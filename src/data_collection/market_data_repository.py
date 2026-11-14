@@ -11,6 +11,9 @@ from src.data_collection.data_validator import validate_market_data
 class MarketDataRepository:
     """
     Stores and retrieves market candles using SQLite.
+
+    Candles are stored independently for each exchange.
+    Existing records are migrated as Kraken data.
     """
 
     def __init__(self, db_path=None):
@@ -24,30 +27,102 @@ class MarketDataRepository:
 
         self._initialize_database()
 
+    @staticmethod
+    def _validate_exchange(exchange: str) -> None:
+        if not isinstance(exchange, str) or not exchange.strip():
+            raise ValueError("Exchange must be a non-empty string.")
+
     def _initialize_database(self):
 
         with closing(sqlite3.connect(self.db_path)) as connection:
-             with connection:
-                connection.execute("""
-                    CREATE TABLE IF NOT EXISTS market_candles (
-                        market TEXT NOT NULL,
-                        symbol TEXT NOT NULL,
-                        timeframe TEXT NOT NULL,
-                        timestamp TEXT NOT NULL,
-                        open REAL NOT NULL,
-                        high REAL NOT NULL,
-                        low REAL NOT NULL,
-                        close REAL NOT NULL,
-                        volume REAL NOT NULL,
-
-                        PRIMARY KEY (
-                            market,
-                            symbol,
-                            timeframe,
-                            timestamp
-                        )
-                    )
+            with connection:
+                cursor = connection.execute("""
+                    SELECT name
+                    FROM sqlite_master
+                    WHERE type = 'table'
+                    AND name = 'market_candles'
                 """)
+
+                table_exists = cursor.fetchone() is not None
+
+                if not table_exists:
+                    self._create_table(connection)
+                    return
+
+                columns = connection.execute("""
+                    PRAGMA table_info(market_candles)
+                """).fetchall()
+
+                column_names = [column[1] for column in columns]
+
+                if "exchange" in column_names:
+                    return
+
+                # Preserve the old table temporarily.
+                connection.execute("""
+                    ALTER TABLE market_candles
+                    RENAME TO market_candles_legacy
+                """)
+
+                self._create_table(connection)
+
+                # All existing records originated from Kraken.
+                connection.execute("""
+                    INSERT INTO market_candles (
+                        exchange,
+                        market,
+                        symbol,
+                        timeframe,
+                        timestamp,
+                        open,
+                        high,
+                        low,
+                        close,
+                        volume
+                    )
+                    SELECT
+                        'kraken',
+                        market,
+                        symbol,
+                        timeframe,
+                        timestamp,
+                        open,
+                        high,
+                        low,
+                        close,
+                        volume
+                    FROM market_candles_legacy
+                """)
+
+                connection.execute("""
+                    DROP TABLE market_candles_legacy
+                """)
+
+    @staticmethod
+    def _create_table(connection):
+
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS market_candles (
+                exchange TEXT NOT NULL,
+                market TEXT NOT NULL,
+                symbol TEXT NOT NULL,
+                timeframe TEXT NOT NULL,
+                timestamp TEXT NOT NULL,
+                open REAL NOT NULL,
+                high REAL NOT NULL,
+                low REAL NOT NULL,
+                close REAL NOT NULL,
+                volume REAL NOT NULL,
+
+                PRIMARY KEY (
+                    exchange,
+                    market,
+                    symbol,
+                    timeframe,
+                    timestamp
+                )
+            )
+        """)
 
     def save_candles(
         self,
@@ -69,11 +144,15 @@ class MarketDataRepository:
                     f"Cannot save invalid candle: {'; '.join(errors)}"
                 )
 
+            exchange = candle.exchange
+            self._validate_exchange(exchange)
+
             timestamp = candle.timestamp.astimezone(
                 timezone.utc
             ).isoformat()
 
             rows.append((
+                exchange.lower().strip(),
                 candle.market,
                 candle.symbol,
                 timeframe,
@@ -89,6 +168,7 @@ class MarketDataRepository:
             with connection:
                 connection.executemany("""
                     INSERT INTO market_candles (
+                        exchange,
                         market,
                         symbol,
                         timeframe,
@@ -99,9 +179,10 @@ class MarketDataRepository:
                         close,
                         volume
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 
                     ON CONFLICT (
+                        exchange,
                         market,
                         symbol,
                         timeframe,
@@ -114,6 +195,7 @@ class MarketDataRepository:
                         close = excluded.close,
                         volume = excluded.volume
                 """, rows)
+
         return len(rows)
 
     def get_latest_candle_timestamp(
@@ -121,30 +203,21 @@ class MarketDataRepository:
         symbol: str,
         market: str,
         timeframe: str,
+        exchange: str = "kraken",
     ) -> datetime | None:
-        """
-        Return the timestamp of the latest stored candle.
 
-        Returns None if no matching candles exist.
-        """
-
-        if not isinstance(symbol, str) or not symbol.strip():
-            raise ValueError("Symbol must be a non-empty string.")
-
-        if not isinstance(market, str) or not market.strip():
-            raise ValueError("Market must be a non-empty string.")
-
-        if not isinstance(timeframe, str) or not timeframe.strip():
-            raise ValueError("Timeframe must be a non-empty string.")
+        self._validate_exchange(exchange)
 
         with closing(sqlite3.connect(self.db_path)) as connection:
             cursor = connection.execute("""
                 SELECT MAX(timestamp)
                 FROM market_candles
-                WHERE symbol = ?
+                WHERE exchange = ?
+                AND symbol = ?
                 AND market = ?
                 AND timeframe = ?
             """, (
+                exchange.lower().strip(),
                 symbol,
                 market,
                 timeframe,
@@ -162,30 +235,21 @@ class MarketDataRepository:
         symbol: str,
         market: str,
         timeframe: str,
+        exchange: str = "kraken",
     ) -> datetime | None:
-        """
-        Return the timestamp of the earliest stored candle.
 
-        Returns None if no matching candles exist.
-        """
-
-        if not isinstance(symbol, str) or not symbol.strip():
-            raise ValueError("Symbol must be a non-empty string.")
-
-        if not isinstance(market, str) or not market.strip():
-            raise ValueError("Market must be a non-empty string.")
-
-        if not isinstance(timeframe, str) or not timeframe.strip():
-            raise ValueError("Timeframe must be a non-empty string.")
+        self._validate_exchange(exchange)
 
         with closing(sqlite3.connect(self.db_path)) as connection:
             cursor = connection.execute("""
                 SELECT MIN(timestamp)
                 FROM market_candles
-                WHERE symbol = ?
+                WHERE exchange = ?
+                AND symbol = ?
                 AND market = ?
                 AND timeframe = ?
             """, (
+                exchange.lower().strip(),
                 symbol,
                 market,
                 timeframe,
@@ -205,19 +269,10 @@ class MarketDataRepository:
         timeframe: str,
         start: datetime,
         end: datetime,
+        exchange: str = "kraken",
     ) -> list[datetime]:
-        """
-        Return all stored candle timestamps within a time range.
-        """
 
-        if not isinstance(symbol, str) or not symbol.strip():
-            raise ValueError("Symbol must be a non-empty string.")
-
-        if not isinstance(market, str) or not market.strip():
-            raise ValueError("Market must be a non-empty string.")
-
-        if not isinstance(timeframe, str) or not timeframe.strip():
-            raise ValueError("Timeframe must be a non-empty string.")
+        self._validate_exchange(exchange)
 
         if (
             start.tzinfo is None
@@ -237,13 +292,15 @@ class MarketDataRepository:
             cursor = connection.execute("""
                 SELECT timestamp
                 FROM market_candles
-                WHERE symbol = ?
+                WHERE exchange = ?
+                AND symbol = ?
                 AND market = ?
                 AND timeframe = ?
                 AND timestamp >= ?
                 AND timestamp < ?
                 ORDER BY timestamp ASC
             """, (
+                exchange.lower().strip(),
                 symbol,
                 market,
                 timeframe,
@@ -265,7 +322,10 @@ class MarketDataRepository:
         timeframe: str,
         start: datetime,
         end: datetime,
+        exchange: str = "kraken",
     ) -> list[MarketData]:
+
+        self._validate_exchange(exchange)
 
         if (
             start.tzinfo is None
@@ -282,46 +342,47 @@ class MarketDataRepository:
         end_utc = end.astimezone(timezone.utc).isoformat()
 
         with closing(sqlite3.connect(self.db_path)) as connection:
-            with connection:
-                cursor = connection.execute("""
-                    SELECT
-                        market,
-                        symbol,
-                        timestamp,
-                        open,
-                        high,
-                        low,
-                        close,
-                        volume
-                    FROM market_candles
-                    WHERE symbol = ?
-                    AND market = ?
-                    AND timeframe = ?
-                    AND timestamp >= ?
-                    AND timestamp < ?
-                    ORDER BY timestamp ASC
-                """, (
-                    symbol,
+            cursor = connection.execute("""
+                SELECT
+                    exchange,
                     market,
-                    timeframe,
-                    start_utc,
-                    end_utc,
-                ))
+                    symbol,
+                    timestamp,
+                    open,
+                    high,
+                    low,
+                    close,
+                    volume
+                FROM market_candles
+                WHERE exchange = ?
+                AND symbol = ?
+                AND market = ?
+                AND timeframe = ?
+                AND timestamp >= ?
+                AND timestamp < ?
+                ORDER BY timestamp ASC
+            """, (
+                exchange.lower().strip(),
+                symbol,
+                market,
+                timeframe,
+                start_utc,
+                end_utc,
+            ))
 
-                rows = cursor.fetchall()
-
-            
+            rows = cursor.fetchall()
 
         return [
             MarketData(
-                market=row[0],
-                symbol=row[1],
-                timestamp=datetime.fromisoformat(row[2]),
-                open=row[3],
-                high=row[4],
-                low=row[5],
-                close=row[6],
-                volume=row[7],
+                exchange=row[0],
+                market=row[1],
+                symbol=row[2],
+                timestamp=datetime.fromisoformat(row[3]),
+                open=row[4],
+                high=row[5],
+                low=row[6],
+                close=row[7],
+                volume=row[8],
             )
             for row in rows
         ]

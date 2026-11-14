@@ -19,6 +19,9 @@ def validate_market_data(candle: MarketData) -> list[str]:
 
     errors = []
 
+    if not isinstance(candle.exchange, str) or not candle.exchange.strip():
+        errors.append("Exchange must be a non-empty string.")
+
     if not isinstance(candle.symbol, str) or not candle.symbol.strip():
         errors.append("Symbol must be a non-empty string.")
 
@@ -29,9 +32,10 @@ def validate_market_data(candle: MarketData) -> list[str]:
         errors.append("Market must be stock, crypto, or forex.")
 
     if (
-    not isinstance(candle.timestamp, datetime)
-    or candle.timestamp.tzinfo is None
-    or candle.timestamp.utcoffset() is None):
+        not isinstance(candle.timestamp, datetime)
+        or candle.timestamp.tzinfo is None
+        or candle.timestamp.utcoffset() is None
+    ):
         errors.append("Timestamp must be a timezone-aware datetime value.")
 
     prices = {

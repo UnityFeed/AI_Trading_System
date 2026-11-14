@@ -1,3 +1,4 @@
+
 from datetime import datetime, timedelta, timezone
 
 from src.data_collection.market_data_service import MarketDataService
@@ -6,9 +7,13 @@ from src.data_collection.market_data_repository import MarketDataRepository
 
 class MarketDataCollector:
     """
-    Collects missing BTC/USD hourly candles and stores them in SQLite.
+    Collects new completed BTC/USD hourly candles from Kraken.
+
+    This collector handles forward collection only.
+    Historical gap recovery is handled separately.
     """
 
+    EXCHANGE = "kraken"
     SYMBOL = "BTC/USD"
     MARKET = "crypto"
     TIMEFRAME = "1h"
@@ -29,12 +34,6 @@ class MarketDataCollector:
         end: datetime,
         initial_start: datetime | None = None,
     ) -> dict:
-        """
-        Find and collect missing completed hourly candles.
-
-        The end time is rounded down to the beginning of its hour.
-        The end boundary itself is excluded.
-        """
 
         if (
             not isinstance(end, datetime)
@@ -44,17 +43,16 @@ class MarketDataCollector:
             raise ValueError("End time must be a timezone-aware datetime.")
 
         end = end.astimezone(timezone.utc)
-
-        # Exclude the currently forming hourly candle.
         end = end.replace(minute=0, second=0, microsecond=0)
 
-        earliest = self.repository.get_earliest_candle_timestamp(
+        latest = self.repository.get_latest_candle_timestamp(
             symbol=self.SYMBOL,
             market=self.MARKET,
             timeframe=self.TIMEFRAME,
+            exchange=self.EXCHANGE,
         )
 
-        if earliest is None:
+        if latest is None:
 
             if (
                 not isinstance(initial_start, datetime)
@@ -69,7 +67,7 @@ class MarketDataCollector:
             start = initial_start.astimezone(timezone.utc)
 
         else:
-            start = earliest.astimezone(timezone.utc)
+            start = latest.astimezone(timezone.utc) + self.CANDLE_DURATION
 
         if (
             start.minute != 0
@@ -80,94 +78,59 @@ class MarketDataCollector:
 
         if start >= end:
             return {
+                "exchange": self.EXCHANGE,
                 "start": start,
                 "end": end,
                 "fetched": 0,
                 "saved": 0,
-                "missing_remaining": 0,
+                "unreturned_hours": 0,
             }
 
-        existing_timestamps = set(
-            self.repository.get_candle_timestamps(
-                symbol=self.SYMBOL,
-                market=self.MARKET,
-                timeframe=self.TIMEFRAME,
-                start=start,
-                end=end,
-            )
+        total_hours = int(
+            (end - start) / self.CANDLE_DURATION
         )
 
-        expected_timestamps = set()
+        if total_hours > self.MAX_FETCH_HOURS:
+            raise RuntimeError(
+                f"{total_hours} hours of data are missing. "
+                f"The normal Kraken collector supports a maximum of "
+                f"{self.MAX_FETCH_HOURS} hours per run. "
+                "Use the historical recovery process for larger gaps."
+            )
+
+        candles = self.market_data_service.get_candles(
+            symbol=self.SYMBOL,
+            timeframe=self.TIMEFRAME,
+            start=start,
+            end=end,
+        )
+
+        saved_count = self.repository.save_candles(
+            candles=candles,
+            timeframe=self.TIMEFRAME,
+        )
+
+        returned_timestamps = {
+            candle.timestamp.astimezone(timezone.utc)
+            for candle in candles
+        }
+
+        expected_hours = set()
         timestamp = start
 
         while timestamp < end:
-            expected_timestamps.add(timestamp)
+            expected_hours.add(timestamp)
             timestamp += self.CANDLE_DURATION
 
-        missing_timestamps = expected_timestamps - existing_timestamps
-
-        fetched_count = 0
-        saved_count = 0
-
-        # Fetch in chunks to stay below Kraken's 720-candle limit.
-        chunk_start = start
-
-        while chunk_start < end:
-
-            chunk_end = min(
-                chunk_start + self.MAX_FETCH_HOURS * self.CANDLE_DURATION,
-                end,
-            )
-
-            chunk_missing = {
-                timestamp
-                for timestamp in missing_timestamps
-                if chunk_start <= timestamp < chunk_end
-            }
-
-            if chunk_missing:
-
-                candles = self.market_data_service.get_candles(
-                    symbol=self.SYMBOL,
-                    timeframe=self.TIMEFRAME,
-                    start=chunk_start,
-                    end=chunk_end,
-                )
-
-                fetched_count += len(candles)
-
-                candles_to_save = [
-                    candle
-                    for candle in candles
-                    if candle.timestamp.astimezone(timezone.utc)
-                    in chunk_missing
-                ]
-
-                saved_count += self.repository.save_candles(
-                    candles=candles_to_save,
-                    timeframe=self.TIMEFRAME,
-                )
-
-            chunk_start = chunk_end
-
-        remaining_timestamps = set(
-            self.repository.get_candle_timestamps(
-                symbol=self.SYMBOL,
-                market=self.MARKET,
-                timeframe=self.TIMEFRAME,
-                start=start,
-                end=end,
-            )
-        )
-
-        missing_remaining = len(
-            expected_timestamps - remaining_timestamps
+        unreturned_hours = len(
+            expected_hours - returned_timestamps
         )
 
         return {
+            "exchange": self.EXCHANGE,
             "start": start,
             "end": end,
-            "fetched": fetched_count,
+            "fetched": len(candles),
             "saved": saved_count,
-            "missing_remaining": missing_remaining,
+            "unreturned_hours": unreturned_hours,
         }

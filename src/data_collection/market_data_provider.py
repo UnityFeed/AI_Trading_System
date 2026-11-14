@@ -10,6 +10,8 @@ class MarketDataProvider(ABC):
     Base interface for all external market data providers.
     """
 
+    exchange: str
+
     @abstractmethod
     def fetch_candles(
         self,
@@ -22,8 +24,11 @@ class MarketDataProvider(ABC):
         Fetch historical market candles.
 
         The returned candles must:
-        - Use our standard MarketData format.
+        - Use the standard MarketData format.
+        - Identify the correct exchange.
         - Be ordered from oldest to newest.
+        - Have timezone-aware timestamps.
         - Have timestamps >= start and < end.
+        - Contain no duplicate timestamps.
         """
         pass

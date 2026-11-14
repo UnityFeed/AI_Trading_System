@@ -13,3 +13,4 @@ class MarketData:
     low: float
     close: float
     volume: float
+    exchange: str = "kraken"

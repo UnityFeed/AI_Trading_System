@@ -19,6 +19,14 @@ class MarketDataService:
         end: datetime,
     ) -> list[MarketData]:
 
+        if (
+            start.tzinfo is None
+            or start.utcoffset() is None
+            or end.tzinfo is None
+            or end.utcoffset() is None
+        ):
+            raise ValueError("Start and end must be timezone-aware.")
+
         if start >= end:
             raise ValueError("Start time must be earlier than end time.")
 
@@ -33,6 +41,11 @@ class MarketDataService:
             raise TypeError("Provider must return a list of candles.")
 
         previous_timestamp = None
+        provider_exchange = getattr(
+            self.provider,
+            "exchange",
+            None,
+        )
 
         for index, candle in enumerate(candles):
 
@@ -40,7 +53,8 @@ class MarketDataService:
 
             if errors:
                 raise ValueError(
-                    f"Invalid candle at index {index}: {'; '.join(errors)}"
+                    f"Invalid candle at index {index}: "
+                    f"{'; '.join(errors)}"
                 )
 
             if candle.symbol != symbol:
@@ -48,9 +62,18 @@ class MarketDataService:
                     f"Unexpected symbol at index {index}: {candle.symbol}"
                 )
 
-            if not start <= candle.timestamp < end:
+            if provider_exchange is not None:
+                if candle.exchange.lower() != provider_exchange.lower():
+                    raise ValueError(
+                        f"Unexpected exchange at index {index}: "
+                        f"{candle.exchange}. "
+                        f"Expected {provider_exchange}."
+                    )
+
+            if candle.timestamp < start or candle.timestamp >= end:
                 raise ValueError(
-                    f"Candle timestamp outside requested time range at index {index}."
+                    f"Candle timestamp outside requested time range "
+                    f"at index {index}."
                 )
 
             if (

@@ -9,6 +9,7 @@ from src.data_collection.market_data_provider import MarketDataProvider
 
 
 class KrakenProvider(MarketDataProvider):
+    exchange = "kraken"
     """
     Retrieves public OHLC market data from Kraken.
     No API key is required.
@@ -109,6 +110,7 @@ class KrakenProvider(MarketDataProvider):
 
             candles.append(
                 MarketData(
+                    exchange="kraken",
                     symbol=symbol,
                     market="crypto",
                     timestamp=timestamp,
