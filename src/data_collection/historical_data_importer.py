@@ -13,6 +13,7 @@ class HistoricalDataImporter:
     Imports Kraken historical OHLCVT CSV data into SQLite.
     """
 
+    EXCHANGE = "kraken"
     SYMBOL = "BTC/USD"
     MARKET = "crypto"
     TIMEFRAME = "1h"
@@ -89,6 +90,7 @@ class HistoricalDataImporter:
                     )
 
                     candle = MarketData(
+                        exchange=self.EXCHANGE,
                         symbol=self.SYMBOL,
                         market=self.MARKET,
                         timestamp=timestamp,
@@ -131,6 +133,7 @@ class HistoricalDataImporter:
 
         return {
             "file": str(csv_path),
+            "exchange": self.EXCHANGE,
             "symbol": self.SYMBOL,
             "timeframe": self.TIMEFRAME,
             "rows_read": line_number,

@@ -9,12 +9,13 @@ from src.data_collection.market_data_provider import MarketDataProvider
 
 
 class KrakenProvider(MarketDataProvider):
-    exchange = "kraken"
+   
     """
     Retrieves public OHLC market data from Kraken.
     No API key is required.
     """
-
+    exchange = "kraken"
+    
     BASE_URL = "https://api.kraken.com/0/public/OHLC"
 
     TIMEFRAMES = {
