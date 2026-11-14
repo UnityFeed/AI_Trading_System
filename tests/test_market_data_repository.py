@@ -57,6 +57,80 @@ class TestMarketDataRepository(unittest.TestCase):
         self.assertEqual(retrieved[0].volume, 125.5)
         self.assertEqual(retrieved[0].timestamp, self.timestamp)
 
+
+    def test_get_latest_candle_timestamp(self):
+
+        second_candle = MarketData(
+            symbol="BTC/USD",
+            market="crypto",
+            timestamp=self.timestamp + timedelta(hours=1),
+            open=95500.0,
+            high=97000.0,
+            low=95000.0,
+            close=96500.0,
+            volume=150.0,
+        )
+
+        third_candle = MarketData(
+            symbol="BTC/USD",
+            market="crypto",
+            timestamp=self.timestamp + timedelta(hours=2),
+            open=96500.0,
+            high=98000.0,
+            low=96000.0,
+            close=97500.0,
+            volume=175.0,
+        )
+
+        self.repository.save_candles(
+            [self.candle, second_candle, third_candle],
+            "1h",
+        )
+
+        latest = self.repository.get_latest_candle_timestamp(
+            "BTC/USD",
+            "crypto",
+            "1h",
+        )
+
+        self.assertEqual(
+            latest,
+            self.timestamp + timedelta(hours=2),
+        )
+
+    def test_latest_candle_timestamp_returns_none_when_empty(self):
+
+        latest = self.repository.get_latest_candle_timestamp(
+            "BTC/USD",
+            "crypto",
+            "1h",
+        )
+
+        self.assertIsNone(latest)
+
+    def test_latest_timestamp_is_separated_by_timeframe(self):
+
+        self.repository.save_candles(
+            [self.candle],
+            "1h",
+        )
+
+        latest_1h = self.repository.get_latest_candle_timestamp(
+            "BTC/USD",
+            "crypto",
+            "1h",
+        )
+
+        latest_4h = self.repository.get_latest_candle_timestamp(
+            "BTC/USD",
+            "crypto",
+            "4h",
+        )
+
+        self.assertEqual(latest_1h, self.timestamp)
+        self.assertIsNone(latest_4h)
+
+
     def test_duplicate_candle_is_updated(self):
 
         self.repository.save_candles(

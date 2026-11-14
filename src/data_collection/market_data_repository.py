@@ -116,6 +116,47 @@ class MarketDataRepository:
                 """, rows)
         return len(rows)
 
+    def get_latest_candle_timestamp(
+        self,
+        symbol: str,
+        market: str,
+        timeframe: str,
+    ) -> datetime | None:
+        """
+        Return the timestamp of the latest stored candle.
+
+        Returns None if no matching candles exist.
+        """
+
+        if not isinstance(symbol, str) or not symbol.strip():
+            raise ValueError("Symbol must be a non-empty string.")
+
+        if not isinstance(market, str) or not market.strip():
+            raise ValueError("Market must be a non-empty string.")
+
+        if not isinstance(timeframe, str) or not timeframe.strip():
+            raise ValueError("Timeframe must be a non-empty string.")
+
+        with closing(sqlite3.connect(self.db_path)) as connection:
+            cursor = connection.execute("""
+                SELECT MAX(timestamp)
+                FROM market_candles
+                WHERE symbol = ?
+                AND market = ?
+                AND timeframe = ?
+            """, (
+                symbol,
+                market,
+                timeframe,
+            ))
+
+            row = cursor.fetchone()
+
+        if row[0] is None:
+            return None
+
+        return datetime.fromisoformat(row[0])
+
     def get_candles(
         self,
         symbol: str,
