@@ -217,6 +217,98 @@ class TestMarketDataRepository(unittest.TestCase):
                 self.timestamp,
             )
 
+    def test_get_candle_timestamps(self):
+
+        second_candle = MarketData(
+            symbol="BTC/USD",
+            market="crypto",
+            timestamp=self.timestamp + timedelta(hours=1),
+            open=95500.0,
+            high=97000.0,
+            low=95000.0,
+            close=96500.0,
+            volume=150.0,
+        )
+
+        self.repository.save_candles(
+            [self.candle, second_candle],
+            "1h",
+        )
+
+        timestamps = self.repository.get_candle_timestamps(
+            "BTC/USD",
+            "crypto",
+            "1h",
+            self.timestamp,
+            self.timestamp + timedelta(hours=2),
+        )
+
+        self.assertEqual(
+            timestamps,
+            [
+                self.timestamp,
+                self.timestamp + timedelta(hours=1),
+            ],
+        )
+
+    def test_get_candle_timestamps_returns_empty_list(self):
+
+        timestamps = self.repository.get_candle_timestamps(
+            "BTC/USD",
+            "crypto",
+            "1h",
+            self.timestamp,
+            self.timestamp + timedelta(hours=2),
+        )
+
+        self.assertEqual(timestamps, [])
+
+    def test_get_candle_timestamps_rejects_invalid_range(self):
+
+        with self.assertRaises(ValueError):
+            self.repository.get_candle_timestamps(
+                "BTC/USD",
+                "crypto",
+                "1h",
+                self.timestamp + timedelta(hours=2),
+                self.timestamp,
+            )
+
+    def test_get_earliest_candle_timestamp(self):
+
+        second_candle = MarketData(
+            symbol="BTC/USD",
+            market="crypto",
+            timestamp=self.timestamp + timedelta(hours=1),
+            open=95500.0,
+            high=97000.0,
+            low=95000.0,
+            close=96500.0,
+            volume=150.0,
+        )
+
+        self.repository.save_candles(
+            [second_candle, self.candle],
+            "1h",
+        )
+
+        earliest = self.repository.get_earliest_candle_timestamp(
+            "BTC/USD",
+            "crypto",
+            "1h",
+        )
+
+        self.assertEqual(earliest, self.timestamp)
+
+    def test_earliest_candle_timestamp_returns_none_when_empty(self):
+
+        earliest = self.repository.get_earliest_candle_timestamp(
+            "BTC/USD",
+            "crypto",
+            "1h",
+        )
+
+        self.assertIsNone(earliest)
 
 if __name__ == "__main__":
     unittest.main()

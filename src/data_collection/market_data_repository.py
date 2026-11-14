@@ -157,6 +157,107 @@ class MarketDataRepository:
 
         return datetime.fromisoformat(row[0])
 
+    def get_earliest_candle_timestamp(
+        self,
+        symbol: str,
+        market: str,
+        timeframe: str,
+    ) -> datetime | None:
+        """
+        Return the timestamp of the earliest stored candle.
+
+        Returns None if no matching candles exist.
+        """
+
+        if not isinstance(symbol, str) or not symbol.strip():
+            raise ValueError("Symbol must be a non-empty string.")
+
+        if not isinstance(market, str) or not market.strip():
+            raise ValueError("Market must be a non-empty string.")
+
+        if not isinstance(timeframe, str) or not timeframe.strip():
+            raise ValueError("Timeframe must be a non-empty string.")
+
+        with closing(sqlite3.connect(self.db_path)) as connection:
+            cursor = connection.execute("""
+                SELECT MIN(timestamp)
+                FROM market_candles
+                WHERE symbol = ?
+                AND market = ?
+                AND timeframe = ?
+            """, (
+                symbol,
+                market,
+                timeframe,
+            ))
+
+            row = cursor.fetchone()
+
+        if row[0] is None:
+            return None
+
+        return datetime.fromisoformat(row[0])
+
+    def get_candle_timestamps(
+        self,
+        symbol: str,
+        market: str,
+        timeframe: str,
+        start: datetime,
+        end: datetime,
+    ) -> list[datetime]:
+        """
+        Return all stored candle timestamps within a time range.
+        """
+
+        if not isinstance(symbol, str) or not symbol.strip():
+            raise ValueError("Symbol must be a non-empty string.")
+
+        if not isinstance(market, str) or not market.strip():
+            raise ValueError("Market must be a non-empty string.")
+
+        if not isinstance(timeframe, str) or not timeframe.strip():
+            raise ValueError("Timeframe must be a non-empty string.")
+
+        if (
+            start.tzinfo is None
+            or start.utcoffset() is None
+            or end.tzinfo is None
+            or end.utcoffset() is None
+        ):
+            raise ValueError("Start and end must be timezone-aware.")
+
+        if start >= end:
+            raise ValueError("Start time must be earlier than end time.")
+
+        start_utc = start.astimezone(timezone.utc).isoformat()
+        end_utc = end.astimezone(timezone.utc).isoformat()
+
+        with closing(sqlite3.connect(self.db_path)) as connection:
+            cursor = connection.execute("""
+                SELECT timestamp
+                FROM market_candles
+                WHERE symbol = ?
+                AND market = ?
+                AND timeframe = ?
+                AND timestamp >= ?
+                AND timestamp < ?
+                ORDER BY timestamp ASC
+            """, (
+                symbol,
+                market,
+                timeframe,
+                start_utc,
+                end_utc,
+            ))
+
+            rows = cursor.fetchall()
+
+        return [
+            datetime.fromisoformat(row[0])
+            for row in rows
+        ]
+
     def get_candles(
         self,
         symbol: str,
