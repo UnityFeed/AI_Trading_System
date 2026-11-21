@@ -101,10 +101,13 @@ Run scripts as modules (`-m scripts.name`, no `.py`) because imports start with 
   `database/paper_trading.db`: account, append-only decisions and fills),
   `trader.py` (`PaperTrader`, `ACTIVE_STRATEGY` = candidate 1 on 1d, $10,000
   start, safety checks: stale data, kill switch)
-- `src/reporting/dashboard.py`: `gather` + `render` -> one self-contained HTML
-  page (paper account, strategy state, market readings 1d/4h/1h, data status,
-  research summary, commands); inline SVG charts with hover readout,
-  light/dark theme
+- `src/reporting/dashboard.py`: `gather` + `render` -> the Overview page (key
+  numbers + BTC price, paper account chart, strategy today, latest decisions,
+  market readings 1d/4h/1h, data status, research summary, folded terminal
+  commands); `page()` is the shared HTML shell (favicon, shared `CSS`) used by
+  every page; `CSS` holds the design tokens (light/dark), cards (`.panel`,
+  `.kpi`), tables, badges and pills. Inline SVG charts scroll sideways on
+  phones. Links to app-only pages are left out of the offline file.
 - `src/app/`: `routine.py` (`daily_routine`, `load_history`: shared by
   `scripts/daily_run.py` and the app button), `chart_data.py` (candles +
   indicators per timeframe in chunks, filled-candle flag, trade markers),
@@ -349,6 +352,8 @@ Strategy tester built 21 Nov 2026, 203 tests pass: registry with the three
 step 5a daily candidates; report numbers equal the walk-forward script's
 (candidate 1 on the test DB: +21,024%, 33 trades, worst drop 67.8%, better
 than buy-and-hold in 6/14 years; its 2026 trade equals the paper account's).
+Polish pass 21 Nov 2026: all pages browser-checked in light, dark and 390 px
+phone width with no JS errors and no sideways overflow.
 Margin simulation built 21 Nov 2026, 209 tests pass. Candidate 1 on the test
 DB, 2013-now, 0.80% fee: 1x +21,024% (worst drop 68%); 2x +572% (92%, 2
 liquidations, borrowing costs 1,716% of starting money); 3x -90% (6
@@ -438,9 +443,14 @@ Known issues:
       Kraken's current price into the chart (forming candle updates every few
       seconds), show the strategy's rule checklist live, and alert when a rule
       is about to trigger at the close. Decisions stay on completed candles.
-   e. Schedule the daily routine automatically (Windows Task Scheduler), trade
-      statistics on the overview, fix known issue 1 (`main.py`), desktop
-      shortcut with an icon.
+   e. [DONE 21 Nov 2026] Cleanup and polish (owner request): app startup 6.6 s
+      -> 3.5 s on the test DB (gap filling fetches only missing hours; one
+      shared indicator computation per timeframe), duplicated signal code
+      merged (`conditions.strategy_signals`), `main.py` status check fixed,
+      one-time scripts archived, README rewritten, modern card layout on all
+      pages (shared shell, favicon, pill nav, focus outlines, phone checks).
+   f. Schedule the daily routine automatically (Windows Task Scheduler), trade
+      statistics on the overview, desktop shortcut with an icon.
 8. Risk engine (proposed paper values, not approved: 0.5% risk per trade, 2% max
    daily loss, 5 positions, 2.5% aggregate open risk, no leverage, stop required,
    emergency shutdown) with veto power over the paper trader.
