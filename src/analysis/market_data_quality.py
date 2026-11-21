@@ -100,8 +100,16 @@ def get_clean_candles(
     end: datetime,
     exchange: str = "kraken",
     exclusions_file: str | Path = DEFAULT_EXCLUSIONS_FILE,
+    exclude_zero_volume: bool = True,
 ):
-    """Return stored candles after applying the analysis exclusion list."""
+    """
+    Return stored candles after applying the analysis exclusion list.
+
+    Zero-volume candles are skipped by default. A candle with no trades has
+    no real price: the exchange filled the hour itself (Bitstamp does this,
+    e.g. 107 flat hours during its Jan 2015 outage). Skipping it leaves a
+    gap, which indicators and returns already handle.
+    """
 
     excluded_keys = load_excluded_candle_keys(exclusions_file)
 
@@ -125,7 +133,12 @@ def get_clean_candles(
             candle.timestamp.astimezone(timezone.utc).isoformat(),
         )
 
-        if key not in excluded_keys:
-            clean_candles.append(candle)
+        if key in excluded_keys:
+            continue
+
+        if exclude_zero_volume and candle.volume == 0:
+            continue
+
+        clean_candles.append(candle)
 
     return clean_candles
