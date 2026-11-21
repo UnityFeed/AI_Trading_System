@@ -40,11 +40,13 @@ Run scripts as modules (`-m scripts.name`, no `.py`) because imports start with 
   (SQLite, exchange-aware upsert), providers (Kraken, Bitstamp, Coinbase),
   `MarketDataCollector` (forward collection for Kraken), Kraken trades recovery
 - `src/analysis/`: `indicators.py` (SMA), `returns.py`, `market_data_quality.py`
-  (`get_clean_candles` applies `data/quality/confirmed_anomalies.csv` exclusions)
+  (`get_clean_candles` applies `data/quality/confirmed_anomalies.csv` exclusions
+  and skips zero-volume candles), `primary_history.py` (Bitstamp <2017, Kraken 2017+)
 - `src/strategies/sma_crossover.py`: long-only crossover signals
 - `src/risk_management/`, `src/execution/`: empty packages (not started)
 - `scripts/`: import, update, integrity, comparison and anomaly tools
-- `tests/`: data layer, collector, SMA, returns, SMA crossover, data quality
+- `tests/`: data layer, collector, SMA, returns, SMA crossover, data quality,
+  primary history
   (also guards the real `confirmed_anomalies.csv` against format errors).
   `tests/helpers.py` has `hourly_candles()` for building test candles.
 
@@ -55,7 +57,13 @@ open, high, low, close, volume. DB primary key:
 ## Decisions already made (do not reverse)
 - Kraken is primary; Bitstamp and Coinbase are independent validation sources.
 - NEVER merge exchange candles into one synthetic series. Never overwrite one
-  exchange's rows with another's. Always pass `exchange=` explicitly (repository
+  exchange's rows with another's.
+- Primary history (owner decision 21 Nov 2026): Bitstamp before 2017-01-01,
+  Kraken from 2017-01-01 (first full-coverage Kraken year). Use
+  `get_primary_history` (`src/analysis/primary_history.py`). It returns separate
+  single-exchange segments, never one merged list: run indicators/returns/
+  backtests per segment, so the switch-over acts as a gap. Nothing is copied in
+  the DB. Report backtest results per segment as well as combined. Always pass `exchange=` explicitly (repository
   defaults to "kraken" only for backward compatibility).
 - Do NOT fill missing hours with fabricated candles. Preserve gaps. Rolling windows
   and returns reset or skip across gaps. Do not train sequences across gaps.
@@ -104,21 +112,21 @@ Known issues:
    was checked against docs (300-candle cap, columns time, low, high, open,
    close, volume, granularity 3600).
 3. No 4h/daily derivation exists yet.
-4. OPEN DECISION (owner): from which date Kraken data is used for indicators,
-   backtests and training. Proposed: 2017-01-01 (first full-coverage year);
-   earlier history only from Bitstamp, for long-term context.
-5. Six Kraken outlier hours are `review_pending` in `confirmed_anomalies.csv`
-   (2013-10-22, 2015-01-27 x2, 2015-11-04, 2015-11-05, 2017-05-07). Most fall
-   before the proposed start date; 2017-05-07 22:00 needs a decision.
+4. Kraken outlier 2017-05-07 22:00 (close 1455 vs Coinbase 1610, real volume on
+   both) is `review_pending` and inside the Kraken primary period; decide
+   whether to exclude it. The other five `review_pending` Kraken hours are
+   before 2017 and are no longer used by the primary history.
+5. Bitstamp's pre-2017 history still has its own gaps after cleaning (e.g. the
+   107 h outage 5-9 Jan 2015); these stay gaps.
 6. `compare_exchange_data` and `inspect_exchange_price_outliers` read raw data
    (no exclusions, zero-volume included), so their maxima include known issues.
 
 ## Roadmap (do in order)
 0. [DONE 21 Nov 2026] Data updated and verified (see Status). Bitstamp filler
-   candles handled; outliers classified. Kraken start date open (known issue 4).
+   candles handled; outliers classified; primary history defined.
 1. [DONE 21 Nov 2026] Housekeeping: requirements.txt, fix collector tests, tests
    for SMA, returns and crossover.
-2. Derive 4h and 1d candles from clean hourly data (UTC boundaries, no partial
+2. Derive 4h and 1d candles from clean hourly data, per primary-history segment (UTC boundaries, no partial
    candles, gap-aware). Compare daily with exchange daily candles.
 3. Indicators: EMA 20/50/200, RSI, MACD, Bollinger, ATR, volume features.
    Timeframe-generic, tested, reset across gaps, no look-ahead.
