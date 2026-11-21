@@ -117,7 +117,11 @@ Run scripts as modules (`-m scripts.name`, no `.py`) because imports start with 
 - `src/data_collection/exchange_updater.py`: `update_all_exchanges(repository,
   log)` (moved from the script; `scripts/update_all_exchanges.py` is a wrapper)
 - `src/risk_management/`, `src/execution/`: empty packages (not started)
-- `scripts/`: import, update, integrity, comparison and anomaly tools
+- `scripts/`: update, integrity, comparison, anomaly, research and app tools;
+  `scripts/archive/` holds finished one-time jobs (initial imports incl. the
+  Kraken CSV import, one-off investigations) with a README; run them only as
+  `python -m scripts.archive.<name>` and only with a clear reason
+- `main.py`: read-only status check (database freshness, paper account)
 - `tests/`: data layer, collector, SMA, returns, SMA crossover, data quality,
   primary history, continuous history, timeframes, daily comparison,
   technical indicators, Kraken gap finder, backtesting engine/search, walk-forward,
@@ -375,8 +379,7 @@ check that exchange's own neighbouring hours and trade count, not only other
 exchanges.
 
 Known issues:
-1. `main.py` prints "Database: Connected" without testing the connection, and only
-   initialises the collector.
+1. [FIXED 21 Nov 2026] `main.py` is now a read-only status check.
 2. Bitstamp provider assumptions not confirmed against official docs: max
    `limit=1000`, `end` and `exclude_current_candle` parameters. Coinbase provider
    was checked against docs (300-candle cap, columns time, low, high, open,

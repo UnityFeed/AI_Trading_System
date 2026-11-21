@@ -1,21 +1,56 @@
 ﻿# AI Trading System
 
-A modular, paper-trading-first automated trading platform.
+A personal BTC/USD research and paper-trading app. It keeps 13 years of hourly
+price data from three exchanges, calculates the usual indicators, tests trading
+strategies honestly (with real Kraken fees, no look-ahead, against simply
+holding BTC), and runs the chosen strategy with virtual money.
 
-## Development goals
+**Live trading is not enabled.** Everything runs on your own PC.
 
-- Market data collection
-- Technical analysis
-- Automated trading strategies
-- Independent risk management
-- Backtesting and paper trading
-- Performance monitoring
+## Start
 
-Live trading is not enabled.
+Double-click **`start_app.bat`** in this folder. A browser tab opens:
 
-## Start the app
+| Page | What you see |
+|---|---|
+| **Overview** | Your paper account vs buy-and-hold, what the strategy says today, the market in plain words (1d / 4h / 1h), how fresh your data is |
+| **Chart** | Candlesticks for the whole history (1h / 4h / 1d) with EMA, Bollinger, volume, RSI, MACD and ATR; trades of the paper account or of any strategy's backtest |
+| **Strategy tester** | Any strategy over 2013 to now: result per year, every trade, fee levels, optional margin simulation |
 
-Double-click `start_app.bat` in the project folder. A browser tab opens with
-the overview and an interactive chart; the button "Update data & run paper
-trader" runs the daily routine. Keep the black window open while you use it.
-See `CLAUDE.md` for all commands.
+The button **Update data & run paper trader** downloads the newest candles
+and lets the paper trader act on them. Keep the black window open while you
+use the app; close it to stop.
+
+Quick status check without the app: `python main.py`.
+
+## Setup (once)
+
+```powershell
+cd C:\Users\PC\AI_Trading_System
+python -m venv .venv
+.venv\Scripts\python -m pip install -r requirements.txt
+```
+
+The application uses only the Python standard library (`pytest` is for the
+tests). The chart pages load the open-source TradingView Lightweight Charts
+library from the internet.
+
+## Where things are
+
+```
+start_app.bat           double-click to start the app
+main.py                 quick status check
+src/
+  data_collection/      exchange downloads (Kraken, Bitstamp, Coinbase) and the SQLite store
+  analysis/             data quality, continuous history, timeframes, indicators
+  backtesting/          strategy building blocks, backtest engine, search, walk-forward, reports
+  strategies/registry.py  every strategy the system knows (add new ones here)
+  paper_trading/        virtual account and the trader
+  app/, reporting/      the app pages and server
+scripts/                command-line tools (research, data checks); archive/ = one-time jobs
+tests/                  automated tests: python -m pytest -q
+database/               your data (not in git: back it up yourself)
+```
+
+`CLAUDE.md` is the full project guide: every decision, the research results so
+far, the roadmap and all commands.
