@@ -15,7 +15,9 @@ used to choose the strategy, so this view is optimistic. The walk-forward
 from datetime import datetime, timedelta
 
 from src.backtesting.conditions import evaluate_all
-from src.backtesting.engine import BacktestResult, CostSettings, buy_and_hold, run_backtest
+from src.backtesting.engine import (
+    NO_MARGIN, BacktestResult, CostSettings, MarginSettings, buy_and_hold, run_backtest,
+)
 from src.backtesting.market import Market
 from src.backtesting.walk_forward import summarize
 from src.strategies.registry import StrategyDefinition
@@ -61,13 +63,24 @@ def summary(result: BacktestResult) -> dict:
         "worst_trade_pct": round(min(returns), 2) if returns else None,
         "average_days_held": round(sum(held_days) / len(held_days), 1) if held_days else None,
         "exposure_pct": round(result.exposure_pct, 1),
+        "liquidations": result.liquidations,
+        # borrowing costs as % of the starting capital
+        "margin_costs_pct": round(result.margin_costs * 100, 2),
     }
 
 
-def strategy_report(market: Market, definition: StrategyDefinition, costs: CostSettings) -> dict:
+def strategy_report(
+    market: Market,
+    definition: StrategyDefinition,
+    costs: CostSettings,
+    margin: MarginSettings = NO_MARGIN,
+) -> dict:
     full = range(len(market.candles))
     entry, exit_signal = signals(market, definition)
-    result = run_backtest(market, full, entry, exit_signal, definition.spec.stop_atr, costs, record_equity=True)
+    result = run_backtest(
+        market, full, entry, exit_signal, definition.spec.stop_atr, costs,
+        record_equity=True, margin=margin,
+    )
     held = buy_and_hold(market, full, costs, record_equity=True)
 
     per_year_strategy = summarize(result).years
@@ -91,6 +104,14 @@ def strategy_report(market: Market, definition: StrategyDefinition, costs: CostS
             "origin": definition.origin,
         },
         "costs": {"fee_pct": costs.fee_pct, "slippage_pct": costs.slippage_pct},
+        "margin": {
+            "leverage": margin.leverage,
+            "open_fee_pct": margin.open_fee_pct,
+            "rollover_fee_pct": margin.rollover_fee_pct,
+            "rollover_hours": margin.rollover_hours,
+            "liquidation_level_pct": margin.liquidation_level_pct,
+            "liquidation_fee_pct": margin.liquidation_fee_pct,
+        },
         "summary": summary(result),
         "buy_and_hold": summary(held),
         "years": years,

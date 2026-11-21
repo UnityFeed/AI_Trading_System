@@ -40,7 +40,8 @@ Run scripts as modules (`-m scripts.name`, no `.py`) because imports start with 
   http://127.0.0.1:8765 (this PC only) and opens the browser. Pages: Overview
   (dashboard), Chart (interactive; "Trades" selector shows the paper account
   or any strategy's full backtest) and Strategy tester (full-history backtest
-  of any strategy: vs buy-and-hold, per year, every trade, 0.80%/0.40% fees). The button "Update data & run paper
+  of any strategy: vs buy-and-hold, per year, every trade, 0.80%/0.40% fees,
+  margin Off/2x/3x/5x/10x). The button "Update data & run paper
   trader" does the daily routine. Keep the black window open; close it to stop.
 - Activate venv: `.venv\Scripts\Activate.ps1` (then `python` = venv python)
 - DAILY ROUTINE (update data, paper trade, rebuild dashboard):
@@ -201,7 +202,20 @@ open, high, low, close, volume. DB primary key:
 - Backtest costs: default fee 0.80% per side = Kraken Pro taker fee, lowest
   tier ($0+), from kraken.com/pro/fees, checked 21 Nov 2026 (maker 0.40%;
   $2.5K+: 0.30/0.60; $10K+: 0.22/0.38; Buy Crypto app ~1% + spread). Slippage
-  0.05% per side is an assumption. Long-only, all-in/all-out, no leverage.
+  0.05% per side is an assumption. Long-only, all-in/all-out, no leverage by
+  default.
+- Margin is a SIMULATION toggle only (owner request 21 Nov 2026; the owner does
+  not trade on margin): `MarginSettings` in `engine.py`, Strategy tester
+  "Margin" select (1x default = identical results to no margin). The paper
+  trader and any future live trading never use margin unless the owner asks.
+  Kraken spot margin, long BTC/USD, from support.kraken.com read 21 Nov 2026:
+  opening fee 0.025% and rollover 0.025% per 4 h, both on the borrowed USD;
+  normal trading fee on opening and closing the whole position; max leverage
+  BTC/USD 2-20x (international/ECP clients); margin level = equity / used
+  margin; liquidation at 40% with a 2% liquidation fee (ASSUMED charged on the
+  position value; Kraken does not say). Liquidation is checked on each
+  candle's low; a gap below the liquidation price closes at the open.
+  Buy-and-hold stays unleveraged in the comparison.
 - Strategy selection guards against overfitting: windows 2013-2016 (bitstamp
   era) and 2017-2021 (kraken era) are used to choose; a combination is ranked
   by its WEAKEST selection window (calmar = yearly return / max drop) and needs
@@ -331,6 +345,12 @@ Strategy tester built 21 Nov 2026, 203 tests pass: registry with the three
 step 5a daily candidates; report numbers equal the walk-forward script's
 (candidate 1 on the test DB: +21,024%, 33 trades, worst drop 67.8%, better
 than buy-and-hold in 6/14 years; its 2026 trade equals the paper account's).
+Margin simulation built 21 Nov 2026, 209 tests pass. Candidate 1 on the test
+DB, 2013-now, 0.80% fee: 1x +21,024% (worst drop 68%); 2x +572% (92%, 2
+liquidations, borrowing costs 1,716% of starting money); 3x -90% (6
+liquidations); 5x and 10x wiped out. Rollover 0.025% per 4 h is ~55% of the
+borrowed amount per year, which eats the extra gains of a strategy that holds
+for weeks to months; daily-candle lows of -30% liquidate 2x positions.
 
 Step 0 results (owner ran on PC, 21 Nov 2026, data current to 2026-11-21 11:00 UTC;
 SQLite integrity ok, 0 duplicates, 0 invalid OHLCV, 0 non-aligned timestamps):
@@ -410,11 +430,12 @@ Known issues:
       daily routine.
    b. [DONE 21 Nov 2026] Strategy tester page + strategy registry: every strategy
       gets the full-history test and its trades on the chart.
-   c. NEXT: LIVE MODE (owner wants the strategy on a live price chart): stream
+   c. [DONE 21 Nov 2026] Margin simulation toggle in the Strategy tester.
+   d. NEXT: LIVE MODE (owner wants the strategy on a live price chart): stream
       Kraken's current price into the chart (forming candle updates every few
       seconds), show the strategy's rule checklist live, and alert when a rule
       is about to trigger at the close. Decisions stay on completed candles.
-   d. Schedule the daily routine automatically (Windows Task Scheduler), trade
+   e. Schedule the daily routine automatically (Windows Task Scheduler), trade
       statistics on the overview, fix known issue 1 (`main.py`), desktop
       shortcut with an icon.
 8. Risk engine (proposed paper values, not approved: 0.5% risk per trade, 2% max

@@ -21,7 +21,7 @@ from urllib.parse import parse_qs, urlparse
 from src.app.chart_data import build_series, chunk, trade_markers
 from src.app.chart_page import NAV_CSS, NAV_SCRIPT, chart_page, nav_html
 from src.app.strategy_page import strategy_page
-from src.backtesting.engine import CostSettings
+from src.backtesting.engine import CostSettings, MarginSettings
 from src.backtesting.market import build_market
 from src.backtesting.report import strategy_report, trade_markers_from_report
 from src.strategies.registry import ACTIVE_STRATEGY_ID, STRATEGIES, get_strategy
@@ -33,6 +33,7 @@ from src.reporting.dashboard import gather, render
 
 TIMEFRAMES = ("1h", "4h", "1d")
 FEES = (0.80, 0.40)
+LEVERAGES = (1.0, 2.0, 3.0, 5.0, 10.0)  # Kraken allows up to 20x on BTC/USD
 MAX_CHUNK = 5000
 
 
@@ -65,9 +66,9 @@ class AppState:
             self.markets = {}
             self.reports = {}
 
-    def report(self, strategy_id: str, fee_pct: float) -> dict:
+    def report(self, strategy_id: str, fee_pct: float, leverage: float = 1.0) -> dict:
         """Full-history backtest report, cached until the next data reload."""
-        key = (strategy_id, fee_pct)
+        key = (strategy_id, fee_pct, leverage)
         with self.data_lock:
             if key in self.reports:
                 return self.reports[key]
@@ -75,7 +76,9 @@ class AppState:
             market = self.markets.get(definition.timeframe)
             if market is None:
                 market = self.markets[definition.timeframe] = build_market(self.history, definition.timeframe)
-            report = strategy_report(market, definition, CostSettings(fee_pct=fee_pct))
+            report = strategy_report(
+                market, definition, CostSettings(fee_pct=fee_pct), MarginSettings(leverage=leverage)
+            )
             self.reports[key] = report
             return report
 
@@ -145,6 +148,7 @@ def make_handler(state: AppState):
                 return self._json({
                     "active": ACTIVE_STRATEGY_ID,
                     "fees": FEES,
+                    "leverages": LEVERAGES,
                     "strategies": [
                         {"id": s.id, "name": s.name, "timeframe": s.timeframe, "rules": s.spec.name,
                          "description": s.description, "origin": s.origin}
@@ -156,12 +160,13 @@ def make_handler(state: AppState):
                 strategy_id = query.get("strategy", [ACTIVE_STRATEGY_ID])[0]
                 try:
                     fee = float(query.get("fee", [FEES[0]])[0])
+                    leverage = float(query.get("leverage", ["1"])[0])
                     get_strategy(strategy_id)
                 except (KeyError, ValueError):
                     return self._json({"error": "unknown strategy or bad fee"}, 400)
-                if fee not in FEES:
-                    return self._json({"error": "fee must be one of %s" % (FEES,)}, 400)
-                return self._json(state.report(strategy_id, fee))
+                if fee not in FEES or leverage not in LEVERAGES:
+                    return self._json({"error": f"fee must be one of {FEES}, leverage one of {LEVERAGES}"}, 400)
+                return self._json(state.report(strategy_id, fee, leverage))
 
             if url.path == "/api/chart":
                 timeframe = query.get("tf", ["1d"])[0]

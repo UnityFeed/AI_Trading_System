@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 from src.analysis.primary_history import ContinuousHistory, PRIMARY_LABEL, SourceChange
 from src.analysis.technical_indicators import IndicatorSettings
-from src.backtesting.engine import CostSettings, buy_and_hold, run_backtest
+from src.backtesting.engine import CostSettings, MarginSettings, buy_and_hold, run_backtest
 from src.backtesting.market import Market, build_market, untradeable_hours
 from src.backtesting.search import StrategySpec, all_specs, search
 from tests.helpers import BASE_TIME, hourly_candles
@@ -137,6 +137,91 @@ class TestEngine(unittest.TestCase):
 
         self.assertEqual(result.trades[0].entry_price, 13)
         self.assertEqual(result.trades[0].exit_reason, "end")
+
+
+def margin_only(leverage, **overrides):
+    """Margin with no borrowing fees unless given, to check the arithmetic."""
+    values = dict(leverage=leverage, open_fee_pct=0.0, rollover_fee_pct=0.0, liquidation_fee_pct=2.0)
+    values.update(overrides)
+    return MarginSettings(**values)
+
+
+def with_lows(market, lows):
+    candles = [replace(c, low=low) for c, low in zip(market.candles, lows)]
+    return replace(market, candles=candles)
+
+
+class TestMargin(unittest.TestCase):
+
+    def test_leverage_one_changes_nothing(self):
+
+        market = make_market([10, 11, 12, 13, 12, 14])
+        plain = run_backtest(market, range(6), flags(6, 0), flags(6, 3), costs=CostSettings())
+        same = run_backtest(market, range(6), flags(6, 0), flags(6, 3), costs=CostSettings(),
+                            margin=MarginSettings(leverage=1.0))
+
+        self.assertEqual(plain.final_equity, same.final_equity)
+        self.assertEqual(plain.trades, same.trades)
+
+    def test_two_times_leverage_doubles_the_move(self):
+
+        # Buy at 100, sell at 110: +10% becomes +20% with 2x (no fees).
+        market = make_market([100, 100, 105, 110, 110])
+
+        result = run_backtest(market, range(5), flags(5, 0), flags(5, 2),
+                              costs=NO_COSTS, margin=margin_only(2.0))
+
+        self.assertAlmostEqual(result.final_equity, 1.2)
+        self.assertAlmostEqual(result.trades[0].return_pct, 20.0)
+
+    def test_borrowing_fees_are_charged_on_the_borrowed_amount(self):
+
+        market = make_market([100, 100, 100, 100])
+        margin = margin_only(2.0, open_fee_pct=1.0, rollover_fee_pct=1.0)
+
+        result = run_backtest(market, range(4), flags(4, 0), flags(4, 2),
+                              costs=NO_COSTS, margin=margin)
+
+        # Borrowed 1.0: opening fee 1% = 0.01; held candles 1 and 2, each 1h
+        # = 1/4 of a 4-hour rollover period: 2 x 0.25% = 0.005.
+        self.assertAlmostEqual(result.margin_costs, 0.015)
+        self.assertAlmostEqual(result.final_equity, 1.0 - 0.015)
+
+    def test_liquidation_at_forty_percent_margin_level(self):
+
+        # 3x at 100: position 3, borrowed 2, used margin 1, 0.03 BTC.
+        # Liquidation when 0.03 x p - 2 = 0.4  ->  p = 80.
+        market = with_lows(make_market([100, 100, 95, 90, 90]), [100, 100, 94, 75, 90])
+
+        result = run_backtest(market, range(5), flags(5, 0), flags(5),
+                              costs=NO_COSTS, margin=margin_only(3.0))
+
+        trade = result.trades[0]
+        self.assertEqual(trade.exit_reason, "liquidated")
+        self.assertAlmostEqual(trade.exit_price, 80.0)
+        self.assertEqual(result.liquidations, 1)
+        # 0.03 x 80 less the 2% liquidation fee, minus the 2 borrowed.
+        self.assertAlmostEqual(result.final_equity, 0.03 * 80 * 0.98 - 2)
+
+    def test_gap_below_the_liquidation_price_closes_at_the_open(self):
+
+        market = with_lows(make_market([100, 100, 70, 70]), [100, 100, 65, 70])
+
+        result = run_backtest(market, range(4), flags(4, 0), flags(4),
+                              costs=NO_COSTS, margin=margin_only(3.0))
+
+        self.assertAlmostEqual(result.trades[0].exit_price, 70.0)
+        self.assertAlmostEqual(result.final_equity, 0.03 * 70 * 0.98 - 2)
+
+    def test_a_wiped_out_account_cannot_trade_again(self):
+
+        market = with_lows(make_market([100, 100, 60, 60, 60, 80]), [100, 100, 55, 60, 60, 80])
+
+        result = run_backtest(market, range(6), flags(6, 0, 3), flags(6),
+                              costs=NO_COSTS, margin=margin_only(3.0))
+
+        self.assertEqual(result.final_equity, 0.0)
+        self.assertEqual(len(result.trades), 1)
 
 
 class TestUntradeableHours(unittest.TestCase):

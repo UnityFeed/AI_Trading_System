@@ -28,6 +28,7 @@ PAGE_SCRIPT = r"""
   var LWC = window.LightweightCharts;
   var params = new URLSearchParams(location.search);
   var strategySelect = document.getElementById('strategy'), feeSelect = document.getElementById('fee');
+  var marginSelect = document.getElementById('margin');
   var chart = null, strategies = [];
 
   function css(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
@@ -47,18 +48,23 @@ PAGE_SCRIPT = r"""
       var o = el('option', f.toFixed(2) + '% per buy/sell' + (f === 0.8 ? ' (market orders)' : ' (limit orders)'));
       o.value = f; feeSelect.appendChild(o);
     });
+    d.leverages.forEach(function (lev) {
+      var o = el('option', lev === 1 ? 'Off (no borrowing)' : lev + 'x (borrow ' + (lev - 1) + 'x your money)');
+      o.value = lev; marginSelect.appendChild(o);
+    });
     strategySelect.value = params.get('strategy') || d.active;
     if (!strategySelect.value) strategySelect.value = d.active;
     load();
   });
   strategySelect.addEventListener('change', load);
   feeSelect.addEventListener('change', load);
+  marginSelect.addEventListener('change', load);
 
   function load() {
     var id = strategySelect.value;
     history.replaceState(null, '', '/strategy?strategy=' + encodeURIComponent(id));
     document.getElementById('status').textContent = 'Running the backtest over the full history...';
-    fetch('/api/backtest?strategy=' + encodeURIComponent(id) + '&fee=' + feeSelect.value)
+    fetch('/api/backtest?strategy=' + encodeURIComponent(id) + '&fee=' + feeSelect.value + '&leverage=' + marginSelect.value)
       .then(function (r) { return r.json(); }).then(render);
   }
 
@@ -71,6 +77,16 @@ PAGE_SCRIPT = r"""
       ' - costs ' + rep.costs.fee_pct + '% fee + ' + rep.costs.slippage_pct + '% slippage per buy and per sell';
     document.getElementById('origin').textContent = 'Where it comes from: ' + s.origin;
     document.getElementById('note').textContent = rep.note;
+    var m = rep.margin, warn = document.getElementById('margin-note');
+    if (m.leverage > 1) {
+      warn.hidden = false;
+      warn.textContent = 'Margin simulation, ' + m.leverage + 'x: every buy uses your money plus ' + (m.leverage - 1) +
+        'x borrowed from Kraken. Costs: ' + m.open_fee_pct + '% of the borrowed amount to open, ' + m.rollover_fee_pct +
+        '% every ' + m.rollover_hours + ' hours while open, plus the normal trading fee on the whole position. ' +
+        'Kraken force-closes (liquidates) the position when your own money in it falls to ' + m.liquidation_level_pct +
+        '% of what you put in, with a ' + m.liquidation_fee_pct + '% liquidation fee. Losses grow as fast as gains. ' +
+        'Buy and hold below is shown WITHOUT margin. This is a simulation only: the paper trader never uses margin.';
+    } else { warn.hidden = true; }
 
     // Summary: strategy vs buy and hold
     var a = rep.summary, b = rep.buy_and_hold;
@@ -87,6 +103,10 @@ PAGE_SCRIPT = r"""
       ['Average days in a trade', a.average_days_held === null ? '-' : String(a.average_days_held), ''],
       ['Time in the market', a.exposure_pct + '%', b.exposure_pct + '%']
     ];
+    if (m.leverage > 1) {
+      rows.push(['Forced closes (liquidations)', String(a.liquidations), '']);
+      rows.push(['Borrowing costs paid (% of starting money)', a.margin_costs_pct.toFixed(1) + '%', '']);
+    }
     var table = document.getElementById('summary'); table.textContent = '';
     var head = el('tr'); ['', s.name, 'Buy and hold'].forEach(function (h, i) { head.appendChild(el('th', h, i ? 'num' : '')); });
     table.appendChild(head);
@@ -162,7 +182,7 @@ PAGE_SCRIPT = r"""
       tr.appendChild(el('td', t.open ? 'now ' + money(t.exit_price) : money(t.exit_price), 'num'));
       tr.appendChild(el('td', String(t.days_held), 'num'));
       tr.appendChild(el('td', pct(t.return_pct), 'num'));
-      tr.appendChild(el('td', t.open ? 'not sold yet' : (t.exit_reason === 'stop' ? 'stop loss' : 'sell rule')));
+      tr.appendChild(el('td', t.open ? 'not sold yet' : ({stop: 'stop loss', liquidated: 'LIQUIDATED (forced close)'}[t.exit_reason] || 'sell rule')));
       trades.appendChild(tr);
     });
   }
@@ -184,10 +204,11 @@ def strategy_page() -> str:
         "with Kraken's fees, next-candle fills and no trades on hours filled in from another exchange.</p>"
         "<div class='controls'><label>Strategy <select id='strategy'></select></label>"
         "<label>Fees <select id='fee'></select></label>"
+        "<label>Margin <select id='margin'></select></label>"
         "<a id='show-on-chart' href='/chart'>Show these trades on the chart &rarr;</a>"
         "<span class='muted' id='status'></span></div>"
         "<p id='description'></p><p class='secondary' id='rules'></p><p class='muted' id='origin'></p>"
-        "<div class='note-box' id='note'></div>"
+        "<div class='note-box' id='note'></div><div class='note-box' id='margin-note' hidden></div>"
         "<h2>Result vs buy and hold</h2><div class='table-scroll'><table id='summary'></table></div>"
         "<h2>Account value over time</h2>"
         "<div class='legend'><span class='legend-item'><span class='legend-key' style='background:var(--series-1)'></span>Strategy</span>"
