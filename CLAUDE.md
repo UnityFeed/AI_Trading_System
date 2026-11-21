@@ -235,6 +235,26 @@ fee 0.80%:
   calmer ride), not a way to beat holding BTC. They give up most of the bull
   markets. Recurring pick: trend filter ema50>ema200 + EMA20/50 or MACD cross.
 
+Step 5c CONFIRMED on the owner's real DB (`run_walk_forward`, fee 0.80%,
+21 Nov 2026, after un-excluding Kraken 2017-05-07 22:00):
+| 2016-now walk-forward | total     | per year | worst drop | calmar |
+| 1d picks              | +3,212%   | 37.9%    | 51.6%      | 0.73   |
+| buy and hold          | +13,548%  | 57.1%    | 83.6%      | 0.68   |
+| 4h picks              | +36%      | 2.8%     | 87.2%      | 0.03   |
+| 1h picks              | -93.5%    |          | 97.0%      |        |
+- 1d: about a quarter of buy-and-hold's total, but similar (slightly better)
+  return per unit of risk and a far smaller worst drop. Picks beat
+  buy-and-hold in only 3/11 years (they win falling years, lag rising ones).
+  The pick was stable 2022-2026: candidate 1 (BUY ema50>ema200 &
+  macd_cross_up | SELL ema20_cross_down_ema50, stop 2xATR) chosen 5 years in a
+  row. Candidate 1 over 2013-now: +27,999% (53.7%/yr, worst drop 57.5%,
+  calmar 0.93) vs buy-and-hold +47,988% (60.1%/yr, 84.9%, 0.71); optimistic,
+  because 2013-2021 was used to choose it.
+- 4h is unstable (test DB +643%, real DB +36%): no reliable edge. 1h loses
+  almost everything after fees. Daily is the only usable timeframe so far.
+- Un-excluding 2017-05-07 mattered: candidate 3 in 2017 went from +253% to
+  +727% (the fake spike had triggered a bad trade).
+
 Step 0 results (owner ran on PC, 21 Nov 2026, data current to 2026-11-21 11:00 UTC;
 SQLite integrity ok, 0 duplicates, 0 invalid OHLCV, 0 non-aligned timestamps):
 | exchange | first candle      | candles | missing hours |
