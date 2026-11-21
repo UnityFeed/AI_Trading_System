@@ -158,7 +158,12 @@ class TestProjectExclusionsFile(unittest.TestCase):
         ) as file:
             rows = list(csv.DictReader(file))
 
-        allowed = {"exclude_pending_review", "keep", "review_pending"}
+        allowed = {
+            "exclude_pending_review",
+            "exclude_owner_reviewed",
+            "keep",
+            "review_pending",
+        }
 
         for line_number, row in enumerate(rows, start=2):
             with self.subTest(line=line_number):
