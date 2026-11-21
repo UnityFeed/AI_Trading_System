@@ -5,21 +5,21 @@ time (log scale), results per year and every trade.
 """
 
 from src.app.chart_page import CHART_CSS, CHART_LIBRARY, NAV_CSS, NAV_SCRIPT, nav_html
-from src.reporting.dashboard import CSS
+from src.reporting.dashboard import page
 
 
 PAGE_CSS = """
 body { height: auto; display: block; }
-.wrap { max-width: 1150px; margin: 0 auto; padding: 16px 16px 64px; }
-.controls { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; margin: 8px 0 16px; }
+.controls { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; margin-bottom: 12px; }
+.controls label { display: inline-flex; align-items: center; gap: 8px; color: var(--text-secondary); font-size: 14px; }
+.controls label { max-width: 100%; } .controls select { max-width: 100%; min-width: 0; text-overflow: ellipsis; }
 .controls a { color: var(--series-1); }
-.note-box { border-left: 4px solid var(--warning); padding: 8px 12px; background: var(--card);
-  border-radius: 6px; margin: 12px 0; color: var(--text-secondary); }
-#equity { height: 380px; position: relative; background: var(--card); border: 1px solid var(--border); border-radius: 10px; }
-#equity-chart { position: absolute; inset: 8px; }
+.note-box { border-left: 4px solid var(--warning); padding: 8px 12px; background: var(--surface);
+  border-radius: 8px; margin: 10px 0 0; color: var(--text-secondary); font-size: 14px; }
+#equity { height: 380px; position: relative; }
+#equity-chart { position: absolute; inset: 0; }
 td.num, th.num { text-align: right; }
-.scroll-y { max-height: 520px; overflow: auto; border-radius: 10px; }
-.scroll-y table { border-radius: 0; }
+.scroll-y { max-height: 520px; overflow: auto; }
 .scroll-y th { position: sticky; top: 0; background: var(--card); }
 """
 
@@ -193,31 +193,31 @@ PAGE_SCRIPT = r"""
 
 
 def strategy_page() -> str:
-    return (
-        "<!doctype html><html lang='en'><head><meta charset='utf-8'>"
-        "<meta name='viewport' content='width=device-width, initial-scale=1'>"
-        "<title>Strategy Tester</title>"
-        f"<style>{CSS}{NAV_CSS}{CHART_CSS}{PAGE_CSS}</style></head><body>"
-        + nav_html("strategy")
-        + "<div class='wrap'><h1>Strategy tester</h1>"
-        "<p class='muted'>Every strategy in the list is tested over the full history (2013 to now) "
-        "with Kraken's fees, next-candle fills and no trades on hours filled in from another exchange.</p>"
-        "<div class='controls'><label>Strategy <select id='strategy'></select></label>"
+    return page(
+        "BTC Trading - Strategy tester",
+        nav_html("strategy")
+        + "<main><header class='page-head'><div><h1>Strategy tester</h1>"
+        "<p class='muted'>Every strategy in the list, tested over the full history (2013 to now) with Kraken's fees, "
+        "next-candle fills and no trades on hours filled in from another exchange.</p></div></header>"
+        "<section class='panel'><div class='controls'>"
+        "<label>Strategy <select id='strategy'></select></label>"
         "<label>Fees <select id='fee'></select></label>"
         "<label>Margin <select id='margin'></select></label>"
         "<a id='show-on-chart' href='/chart'>Show these trades on the chart &rarr;</a>"
         "<span class='muted' id='status'></span></div>"
-        "<p id='description'></p><p class='secondary' id='rules'></p><p class='muted' id='origin'></p>"
-        "<div class='note-box' id='note'></div><div class='note-box' id='margin-note' hidden></div>"
-        "<h2>Result vs buy and hold</h2><div class='table-scroll'><table id='summary'></table></div>"
-        "<h2>Account value over time</h2>"
+        "<p id='description'></p><p class='secondary small' id='rules'></p><p class='muted small' id='origin'></p>"
+        "<div class='note-box' id='note'></div><div class='note-box' id='margin-note' hidden></div></section>"
+        "<section class='panel'><div class='panel-head'><h2>Result vs buy and hold</h2></div>"
+        "<div class='table-scroll'><table class='compact' id='summary'></table></div></section>"
+        "<section class='panel'><div class='panel-head'><h2>Account value over time</h2>"
+        "<span class='muted small'>$10,000 at the start · logarithmic scale: equal steps are equal percentage changes</span></div>"
         "<div class='legend'><span class='legend-item'><span class='legend-key' style='background:var(--series-1)'></span>Strategy</span>"
-        "<span class='legend-item'><span class='legend-key' style='background:var(--series-2)'></span>Buy and hold</span>"
-        "<span class='legend-item muted'>$10,000 at the start; logarithmic scale, so equal steps mean equal percentage changes</span></div>"
-        "<div id='equity'><div id='equity-chart'></div></div>"
-        "<h2>Year by year</h2><p class='secondary' id='years-summary'></p>"
-        "<div class='table-scroll'><table id='years'></table></div>"
-        "<h2>Every trade</h2><div class='scroll-y'><table id='trades'></table></div></div>"
-        f"<script src='{CHART_LIBRARY}'></script>"
-        f"<script>{NAV_SCRIPT}{PAGE_SCRIPT}</script></body></html>"
+        "<span class='legend-item'><span class='legend-key' style='background:var(--series-2)'></span>Buy and hold</span></div>"
+        "<div id='equity'><div id='equity-chart'></div></div></section>"
+        "<section class='panel'><div class='panel-head'><h2>Year by year</h2><span class='secondary small' id='years-summary'></span></div>"
+        "<div class='table-scroll'><table class='compact' id='years'></table></div></section>"
+        "<section class='panel'><div class='panel-head'><h2>Every trade</h2><span class='muted small'>newest first</span></div>"
+        "<div class='scroll-y'><table class='compact' id='trades'></table></div></section></main>",
+        head=f"<style>{NAV_CSS}{CHART_CSS}{PAGE_CSS}</style>",
+        scripts=f"<script src='{CHART_LIBRARY}'></script><script>{NAV_SCRIPT}{PAGE_SCRIPT}</script>",
     )

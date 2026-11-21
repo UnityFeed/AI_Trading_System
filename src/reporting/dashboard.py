@@ -343,47 +343,74 @@ def line_chart(chart_id: str, title: str, series: list[dict], markers=(), y_labe
 
 CSS = """
 :root { color-scheme: light;
-  --surface: #fcfcfb; --card: #ffffff; --border: #e4e3df;
+  --surface: #f5f5f3; --card: #ffffff; --border: #e6e5e1; --border-strong: #d6d5d0;
   --text-primary: #0b0b0b; --text-secondary: #52514e; --text-muted: #6f6e69;
-  --grid: #ecebe7; --series-1: #2a78d6; --series-2: #eb6834; --series-3: #1baf7a;
-  --good: #0ca30c; --warning: #fab219; --serious: #ec835a; --critical: #d03b3b; }
+  --grid: #efeeea; --series-1: #2a78d6; --series-2: #eb6834; --series-3: #1baf7a;
+  --good: #0ca30c; --warning: #fab219; --serious: #ec835a; --critical: #d03b3b;
+  --shadow: 0 1px 2px rgba(16, 16, 15, .05), 0 4px 14px rgba(16, 16, 15, .04);
+  --radius: 14px; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { color-scheme: dark;
-  --surface: #1a1a19; --card: #222221; --border: #383835;
+  --surface: #141413; --card: #1e1e1d; --border: #2f2f2d; --border-strong: #3d3d3a;
   --text-primary: #f0efec; --text-secondary: #c3c2b7; --text-muted: #9a998f;
-  --grid: #2e2e2c; --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70; } }
+  --grid: #2a2a28; --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70;
+  --shadow: 0 1px 2px rgba(0, 0, 0, .3); } }
 :root[data-theme="dark"] { color-scheme: dark;
-  --surface: #1a1a19; --card: #222221; --border: #383835;
+  --surface: #141413; --card: #1e1e1d; --border: #2f2f2d; --border-strong: #3d3d3a;
   --text-primary: #f0efec; --text-secondary: #c3c2b7; --text-muted: #9a998f;
-  --grid: #2e2e2c; --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70; }
+  --grid: #2a2a28; --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70;
+  --shadow: 0 1px 2px rgba(0, 0, 0, .3); }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--surface); color: var(--text-primary);
-  font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
-main { max-width: 1100px; margin: 0 auto; padding: 24px 16px 64px; }
-h1 { font-size: 26px; margin: 0 0 4px; } h2 { font-size: 19px; margin: 36px 0 12px; }
+  font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; -webkit-font-smoothing: antialiased; }
+main { max-width: 1180px; margin: 0 auto; padding: 28px 16px 64px; }
+h1 { font-size: 28px; line-height: 1.2; margin: 0 0 4px; letter-spacing: -0.01em; }
+h2 { font-size: 17px; margin: 0; letter-spacing: -0.005em; }
+h3 { font-size: 15px; }
+a { color: var(--series-1); text-decoration: none; } a:hover { text-decoration: underline; }
+:focus-visible { outline: 2px solid var(--series-1); outline-offset: 2px; border-radius: 4px; }
 .muted { color: var(--text-muted); } .secondary { color: var(--text-secondary); }
+.small { font-size: 13px; }
+p { margin: 8px 0; }
+.page-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: 12px 24px; margin-bottom: 20px; }
+.price-tag { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
+.price-tag strong { font-size: 30px; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.kpi, .card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 16px 18px; box-shadow: var(--shadow); }
+.kpi .label, .card .label { color: var(--text-secondary); font-size: 13px; }
+.kpi .value, .card .value { font-size: 24px; font-weight: 650; font-variant-numeric: tabular-nums; margin: 2px 0; }
+.kpi .sub, .card .sub { color: var(--text-muted); font-size: 13px; }
 .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
-.card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
-.card .label { color: var(--text-secondary); font-size: 13px; }
-.card .value { font-size: 24px; font-weight: 650; font-variant-numeric: tabular-nums; }
-.card .sub { color: var(--text-muted); font-size: 13px; }
-table { width: 100%; border-collapse: collapse; background: var(--card);
-  border: 1px solid var(--border); border-radius: 10px; overflow: hidden; font-variant-numeric: tabular-nums; }
-th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
-th { color: var(--text-secondary); font-weight: 600; font-size: 13px; }
+.panel { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 18px 20px; box-shadow: var(--shadow); margin-bottom: 16px; min-width: 0; }
+.panel-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px; margin-bottom: 12px; }
+.grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 16px; margin-bottom: 0; }
+.grid-2 > .panel { margin-bottom: 16px; }
+table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+th { color: var(--text-muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
 tr:last-child td { border-bottom: none; }
+tbody tr:hover td, table tr:hover td { background: color-mix(in srgb, var(--grid) 45%, transparent); }
+table.compact th, table.compact td { padding: 7px 10px; }
+th.num, td.num { text-align: right; }
 .table-scroll { overflow-x: auto; }
 .badge { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }
 .badge-icon { display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 50%;
-  color: #fff; font-size: 11px; }
+  color: #fff; font-size: 11px; flex: none; }
 .badge.good .badge-icon { background: var(--good); } .badge.warning .badge-icon { background: var(--warning); color: #000; }
-.badge.serious .badge-icon { background: var(--serious); } .badge.neutral .badge-icon { background: var(--text-muted); } .badge.critical .badge-icon { background: var(--critical); }
-.chart-wrap { margin: 0; background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 14px; }
-.chart-title { font-weight: 600; margin-bottom: 4px; }
-.legend { display: flex; flex-wrap: wrap; gap: 16px; color: var(--text-secondary); font-size: 13px; margin-bottom: 6px; }
+.badge.serious .badge-icon { background: var(--serious); } .badge.critical .badge-icon { background: var(--critical); }
+.badge.neutral .badge-icon { background: var(--text-muted); }
+.pill { display: inline-block; padding: 1px 9px; border-radius: 999px; font-size: 12px; font-weight: 650;
+  letter-spacing: .03em; background: var(--grid); color: var(--text-secondary); }
+.pill.strong { background: var(--text-primary); color: var(--card); }
+.pill.warn { background: var(--warning); color: #000; }
+.chart-wrap { margin: 0; }
+.chart-title { font-weight: 600; margin-bottom: 4px; font-size: 14px; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; color: var(--text-secondary); font-size: 13px; margin-bottom: 6px; }
 .legend-item { display: inline-flex; align-items: center; gap: 6px; }
 .legend-key { width: 16px; height: 3px; border-radius: 2px; display: inline-block; }
 .chart-box { position: relative; }
-.chart { width: 100%; height: 300px; display: block; }
+.chart { width: 100%; height: 280px; display: block; }
 .chart .grid { stroke: var(--grid); stroke-width: 1; }
 .chart .axis { fill: var(--text-muted); font-size: 11px; }
 .chart .direct-label { fill: var(--text-secondary); font-size: 12px; }
@@ -391,15 +418,25 @@ tr:last-child td { border-bottom: none; }
 .chart .crosshair { stroke: var(--text-muted); stroke-width: 1; }
 .chart .hit { fill: transparent; }
 .tooltip { position: absolute; top: 8px; pointer-events: none; background: var(--card); border: 1px solid var(--border);
-  border-radius: 8px; padding: 8px 10px; font-size: 13px; box-shadow: 0 4px 16px rgba(0,0,0,.12); min-width: 160px; }
+  border-radius: 10px; padding: 8px 10px; font-size: 13px; box-shadow: 0 6px 20px rgba(0,0,0,.14); min-width: 160px; }
 .tooltip .t-row { display: flex; align-items: center; gap: 8px; justify-content: space-between; }
 .tooltip .t-key { width: 12px; height: 3px; border-radius: 2px; display: inline-block; margin-right: 6px; }
 .tooltip strong { font-variant-numeric: tabular-nums; }
-.rules li { list-style: none; margin: 4px 0; } .rules { padding: 0; }
-code { background: var(--grid); padding: 1px 6px; border-radius: 4px; font-size: 13px; }
-.notice { border-left: 4px solid var(--warning); padding: 8px 12px; background: var(--card); border-radius: 6px; }
-.grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
-details summary { cursor: pointer; color: var(--text-secondary); margin: 8px 0; }
+.rules { padding: 0; margin: 0 0 8px; } .rules li { list-style: none; display: flex; align-items: center; gap: 10px; padding: 7px 0;
+  border-bottom: 1px solid var(--border); } .rules li:last-child { border-bottom: none; }
+ul.tight { margin: 0; padding-left: 18px; } ul.tight li { margin: 6px 0; }
+code { background: var(--grid); padding: 2px 6px; border-radius: 6px; font-size: 13px; }
+.notice { border-left: 4px solid var(--warning); padding: 10px 14px; background: var(--card); border-radius: 8px; box-shadow: var(--shadow); }
+details.panel summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 8px; }
+details.panel summary::-webkit-details-marker { display: none; }
+details.panel summary::before { content: "\\203A"; color: var(--text-muted); font-size: 20px; line-height: 1; transition: transform .15s; }
+details.panel[open] summary::before { transform: rotate(90deg); }
+details.panel[open] summary { margin-bottom: 8px; }
+@media (max-width: 600px) {
+  h1 { font-size: 24px; } .price-tag strong { font-size: 24px; } .panel { padding: 14px; }
+  .chart-box { overflow-x: auto; } .chart { min-width: 640px; }
+  .hide-sm { display: none; }
+}
 """
 
 SCRIPT = """
@@ -440,47 +477,88 @@ document.querySelectorAll('script[data-chart]').forEach(function (node) {
 """
 
 
+FAVICON = (
+    "data:image/svg+xml,"
+    "%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E"
+    "%3Crect width='32' height='32' rx='8' fill='%232a78d6'/%3E"
+    "%3Cpolyline points='6,22 12,15 17,18 26,8' fill='none' stroke='white' "
+    "stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"
+)
+
+
+def page(title: str, body: str, head: str = "", scripts: str = "") -> str:
+    """Shared HTML shell for every page (offline file and app)."""
+    return (
+        "<!doctype html><html lang='en'><head><meta charset='utf-8'>"
+        "<meta name='viewport' content='width=device-width, initial-scale=1'>"
+        f"<title>{esc(title)}</title><link rel='icon' href=\"{FAVICON}\">"
+        f"<style>{CSS}</style>{head}</head><body>{body}{scripts}</body></html>"
+    )
+
+
+def change_24h(candles) -> float | None:
+    """Close-to-close change over the last 24 hours, in percent."""
+    if not candles:
+        return None
+    target = candles[-1].timestamp - timedelta(hours=24)
+    for candle in reversed(candles[-48:]):
+        if candle.timestamp == target:
+            return (candles[-1].close / candle.close - 1) * 100
+    return None
+
+
+ACTION_STYLE = {"BUY": "strong", "SELL": "strong", "SKIP": "warn"}
+
+
 def render(data: DashboardData, nav_html: str = "") -> str:
-    """The dashboard page; `nav_html` adds the app's navigation and buttons."""
-    out = [nav_html]
+    """The overview page; `nav_html` adds the app's navigation and buttons."""
+    out = []
     add = out.append
     gen = data.generated_at
-
-    add(f"<h1>BTC/USD trading dashboard</h1><p class='muted'>Built {gen:%Y-%m-%d %H:%M} UTC · "
-        "paper trading only, no real money · everything below comes from your own database</p>")
-
-    # -- Paper account summary ----------------------------------------------
-    add("<h2>1. Your paper-trading account</h2>")
     account = data.account
-    latest_close = data.history.candles[-1].close if data.history.candles else None
+    in_app = bool(nav_html)  # the offline file has no Chart / Strategy tester pages
+    candles = data.history.candles
+    latest = candles[-1] if candles else None
+
+    # -- Header with the live-ish price -----------------------------------------
+    add("<header class='page-head'><div><h1>Overview</h1>"
+        f"<p class='muted'>Updated {gen:%Y-%m-%d %H:%M} UTC · paper trading only, no real money</p></div>")
+    if latest is not None:
+        change = change_24h(candles)
+        change_text = "" if change is None else f"<span class='muted'>{fmt_pct(change)} in 24 h</span>"
+        add(f"<div class='price-tag'><span class='muted'>BTC/USD</span><strong>{fmt_price(latest.close)}</strong>"
+            f"{change_text}<span class='muted small'>close of {latest.timestamp:%H:%M} UTC hour</span></div>")
+    add("</header>")
+
+    # -- Key numbers --------------------------------------------------------------
     if account is None:
-        add("<p class='notice'>No paper account yet. Run <code>python -m scripts.daily_run</code> to start one.</p>")
+        add("<p class='notice'>No paper account yet. Press <strong>Update data &amp; run paper trader</strong> "
+            "(or run <code>python -m scripts.daily_run</code>) to start one.</p>")
     else:
-        value = account.cash + account.btc * (latest_close or 0)
+        value = account.cash + account.btc * (latest.close if latest else 0)
         result = (value / account.starting_cash - 1) * 100
         bh = data.equity[-1][2] if data.equity else None
-        position = "In BTC" if account.btc > 0 else "In cash (USD)"
+        position = "In BTC" if account.btc > 0 else "In cash"
         if account.pending_side:
             position += f" · {account.pending_side} order waiting"
-        add("<div class='cards'>")
-        add(f"<div class='card'><div class='label'>Account value</div><div class='value'>{fmt_price(value)}</div>"
-            f"<div class='sub'>started with {fmt_price(account.starting_cash)}</div></div>")
-        add(f"<div class='card'><div class='label'>Result</div><div class='value'>{fmt_pct(result)}</div>"
-            f"<div class='sub'>since {account.start_candle:%Y-%m-%d}</div></div>")
+        add("<div class='kpis'>")
+        add(f"<div class='kpi'><div class='label'>Paper account value</div><div class='value'>{fmt_price(value)}</div>"
+            f"<div class='sub'>started with {fmt_price(account.starting_cash)} on {account.start_candle:%Y-%m-%d}</div></div>")
+        add(f"<div class='kpi'><div class='label'>Result</div><div class='value'>{fmt_pct(result)}</div>"
+            "<div class='sub'>after fees and slippage</div></div>")
         if bh is not None:
-            add(f"<div class='card'><div class='label'>Buy and hold over the same period</div>"
+            add(f"<div class='kpi'><div class='label'>Buy and hold, same period</div>"
                 f"<div class='value'>{fmt_pct((bh / account.starting_cash - 1) * 100)}</div>"
                 f"<div class='sub'>{fmt_price(bh)} if you had simply bought</div></div>")
-        add(f"<div class='card'><div class='label'>Position</div><div class='value' style='font-size:20px'>{esc(position)}</div>"
+        add(f"<div class='kpi'><div class='label'>Position</div><div class='value'>{esc(position)}</div>"
             f"<div class='sub'>{account.btc:.6f} BTC · {fmt_price(account.cash)} cash"
             + (f" · stop {fmt_price(account.stop_price)}" if account.stop_price else "") + "</div></div>")
         add("</div>")
-        add(f"<p class='secondary'>Strategy: <strong>{esc(account.strategy)}</strong> on {esc(account.timeframe)} candles. "
-            "Decisions at each daily close (00:00 UTC), orders filled at the next tradeable open with "
-            "Kraken's 0.80% fee and 0.05% slippage. "
-            f"Account created {account.created_at:%Y-%m-%d}; decisions for days before that were replayed from history.</p>")
         if data.kill_switch_on:
             add("<p class='notice'>Kill switch is ON (<code>database/STOP_PAPER_TRADING</code> exists): no new buys.</p>")
+
+        add("<section class='panel'><div class='panel-head'><h2>Paper account</h2>"
+            f"<span class='muted small'>{esc(account.strategy)} · {esc(account.timeframe)} candles</span></div>")
         if len(data.equity) >= 2:
             add(line_chart(
                 "equity", "Account value vs buy and hold (USD)",
@@ -489,32 +567,46 @@ def render(data: DashboardData, nav_html: str = "") -> str:
                     {"name": "Buy and hold", "color": "--series-2", "points": [(t, b) for t, _, b in data.equity]},
                 ],
             ))
+        add("<p class='muted small'>Decisions at each daily close (00:00 UTC); orders fill at the next tradeable open "
+            "with Kraken's 0.80% fee and 0.05% slippage. "
+            f"Account created {account.created_at:%Y-%m-%d}; earlier days were replayed from history.</p></section>")
 
-    # -- Strategy now -------------------------------------------------------
-    add("<h2>2. What the strategy says now</h2>")
+    # -- Strategy today + latest decisions -----------------------------------------
+    add("<div class='grid-2'>")
+    add("<section class='panel'><div class='panel-head'><h2>Strategy today</h2>")
+    if data.daily_rows:
+        add(f"<span class='muted small'>daily candle of {data.daily_rows[-1].timestamp:%Y-%m-%d}</span>")
+    add("</div>")
     if data.strategy_rules:
-        last_day = data.daily_rows[-1].timestamp if data.daily_rows else None
-        add(f"<p class='secondary'>Latest completed daily candle: {last_day:%Y-%m-%d}. "
-            "Buy needs the trend filter AND the trigger; sell needs the sell rule (or the stop).</p><ul class='rules'>")
+        add("<ul class='rules'>")
         for label, ok in data.strategy_rules.items():
-            add(f"<li>{status_badge('good' if ok else 'neutral', 'yes' if ok else 'no')} {esc(label)}</li>")
-        add("</ul>")
+            add(f"<li>{status_badge('good' if ok else 'neutral', 'yes' if ok else 'no')}<span>{esc(label)}</span></li>")
+        add("</ul><p class='muted small'>A buy needs the trend filter AND the trigger. "
+            "A sell needs the sell rule, or the price closing below the stop.</p>")
+    add("</section>")
+    add("<section class='panel'><div class='panel-head'><h2>Latest decisions</h2>"
+        "<span class='muted small'>append-only log</span></div>")
     if data.decisions:
-        add("<div class='table-scroll'><table><tr><th>Daily candle</th><th>Decision</th><th>Why</th><th>Close</th><th>Recorded</th></tr>")
-        for d in data.decisions[:10]:
-            add(f"<tr><td>{d.candle_time:%Y-%m-%d}</td><td><strong>{esc(d.action)}</strong></td><td>{esc(d.reason)}</td>"
-                f"<td>{fmt_price(d.close)}</td><td class='muted'>{d.recorded_at:%Y-%m-%d %H:%M}</td></tr>")
+        add("<div class='table-scroll'><table class='compact'><tr><th>Day</th><th>Decision</th><th class='hide-sm'>Why</th><th class='num'>Close</th></tr>")
+        for d in data.decisions[:7]:
+            style = ACTION_STYLE.get(d.action, "")
+            add(f"<tr><td>{d.candle_time:%Y-%m-%d}</td><td><span class='pill {style}'>{esc(d.action)}</span></td>"
+                f"<td class='secondary hide-sm'>{esc(d.reason)}</td><td class='num'>{fmt_price(d.close)}</td></tr>")
         add("</table></div>")
-        add("<p class='muted'>The decision log is append-only: entries are never changed afterwards.</p>")
+    else:
+        add("<p class='muted'>No decisions yet.</p>")
+    add("</section></div>")
 
-    # -- Market now -----------------------------------------------------------
-    add("<h2>3. The market now</h2>")
+    # -- Market -------------------------------------------------------------------
+    add("<section class='panel'><div class='panel-head'><h2>Market</h2>"
+        + ("<a class='small' href='/chart'>Open the interactive chart &rarr;</a>" if in_app else "")
+        + "</div>")
     if data.daily_rows:
         recent = data.daily_rows[-365:]
-        fill_markers = []
-        for f in data.fills:
-            day = f.filled_at.replace(hour=0, minute=0, second=0, microsecond=0)
-            fill_markers.append((day, f.price, f.side))
+        fill_markers = [
+            (f.filled_at.replace(hour=0, minute=0, second=0, microsecond=0), f.price, f.side)
+            for f in data.fills
+        ]
         add(line_chart(
             "price", "BTC/USD daily close, last 365 days",
             [
@@ -530,46 +622,52 @@ def render(data: DashboardData, nav_html: str = "") -> str:
         readings = {tf: {topic: (verdict, detail) for topic, verdict, detail in market_reading(row.values, row.close)}
                     for tf, _, row in columns}
         topics = list(dict.fromkeys(t for tf, _, _ in columns for t in readings[tf]))
-        add("<div class='table-scroll' style='margin-top:16px'><table><tr><th>Indicator</th>")
+        add("<div class='table-scroll' style='margin-top:16px'><table class='readings'><tr><th>Indicator</th>")
         for tf, label, row in columns:
-            add(f"<th>{label}<div class='muted' style='font-weight:400'>close {fmt_price(row.close)}<br>"
-                f"candle {row.timestamp:%Y-%m-%d %H:%M} UTC</div></th>")
+            add(f"<th>{label}<div class='muted small' style='font-weight:400'>{fmt_price(row.close)} · "
+                f"{row.timestamp:%Y-%m-%d %H:%M}</div></th>")
         add("</tr>")
         for topic in topics:
             add(f"<tr><td>{esc(topic)}</td>")
             for tf, _, _ in columns:
                 verdict, detail = readings[tf].get(topic, ("-", ""))
-                add(f"<td><strong>{esc(verdict)}</strong><div class='muted' style='font-size:13px'>{esc(detail)}</div></td>")
+                add(f"<td><strong>{esc(verdict)}</strong><div class='muted small'>{esc(detail)}</div></td>")
             add("</tr>")
         add("</table></div>")
+    add("</section>")
 
-    # -- Data status ----------------------------------------------------------
-    add("<h2>4. Your data</h2>")
-    add("<div class='table-scroll'><table><tr><th>Exchange</th><th>Status</th><th>Hourly candles</th><th>From</th><th>Latest</th></tr>")
+    # -- Data + research ------------------------------------------------------------
+    add("<div class='grid-2'>")
+    add("<section class='panel'><div class='panel-head'><h2>Your data</h2></div>")
+    add("<div class='table-scroll'><table class='compact'><tr><th>Exchange</th><th>Status</th>"
+        "<th class='num'>Hourly candles</th><th>Latest</th></tr>")
     for ex in data.exchanges:
         kind, label = ex.status
-        add(f"<tr><td>{esc(ex.exchange.capitalize())}</td><td>{status_badge(kind, label)}</td><td>{ex.candles:,}</td>"
-            f"<td>{ex.first:%Y-%m-%d}</td><td>{ex.latest:%Y-%m-%d %H:%M}</td></tr>")
+        add(f"<tr><td>{esc(ex.exchange.capitalize())}</td><td>{status_badge(kind, label)}</td>"
+            f"<td class='num'>{ex.candles:,}</td><td>{ex.latest:%Y-%m-%d %H:%M}</td></tr>")
     add("</table></div>")
     h = data.history
-    filled = len(h.substituted_hours())
-    add(f"<p class='secondary'>Analysis uses one continuous history: Bitstamp before 2017, Kraken from 2017. "
-        f"{len(h.candles):,} hourly candles; {filled} hours were filled from another exchange (Kraken outages); "
-        f"{len(h.unfilled_hours)} hours no exchange has; {len(h.large_jumps())} switches between exchanges moved "
-        "the price by more than 1% (see <code>python -m scripts.report_continuous_history</code>).</p>")
+    add(f"<p class='muted small'>One continuous history: Bitstamp before 2017, Kraken from 2017. "
+        f"{len(h.candles):,} hourly candles; {len(h.substituted_hours())} hours filled from another exchange "
+        f"(Kraken outages); {len(h.unfilled_hours)} hours no exchange has.</p></section>")
+    add("<section class='panel'><div class='panel-head'><h2>Research so far</h2>"
+        + ("<a class='small' href='/strategy'>Strategy tester &rarr;</a>" if in_app else "")
+        + "</div><ul class='secondary tight'>"
+        "<li>540 indicator combinations tested on 1h, 4h and 1d, chosen on older years and checked on years "
+        "they were not chosen on, after Kraken fees.</li>"
+        "<li><strong>Daily trend following</strong> cut the worst drop from 84% to about 52% but made about a "
+        "quarter of buy-and-hold's return (2016-now).</li>"
+        "<li>Hourly and 4-hour strategies did not survive the fees. Margin made results worse.</li></ul></section>")
+    add("</div>")
 
-    # -- Research & next steps -------------------------------------------------
-    add("<h2>5. What the research found so far</h2>")
-    add("<ul class='secondary'>"
-        "<li>Tested 540 indicator combinations on 1h, 4h and 1d candles, chosen on older years and checked on years they were not chosen on, after Kraken fees.</li>"
-        "<li><strong>Daily trend following</strong> (only buy in an uptrend, sell when the shorter trend breaks) "
-        "cut the worst drop from 84% to about 52% but made about a quarter of buy-and-hold's return (2016-now).</li>"
-        "<li>Hourly and 4-hour strategies did not survive the fees. Finding a better strategy is parked for later.</li></ul>")
-
-    add("<h2>6. Where to work from</h2><div class='table-scroll'><table><tr><th>What</th><th>Command (PowerShell, project folder, venv active)</th></tr>")
+    # -- Terminal commands (folded) ---------------------------------------------------
+    add("<details class='panel'><summary><h2>Terminal commands</h2></summary>"
+        "<p class='muted small'>PowerShell, in the project folder, with the venv active. The app's button does the daily routine for you.</p>"
+        "<div class='table-scroll'><table class='compact'>")
     for what, cmd in (
+        ("Start the app", "python -m scripts.run_app  (or double-click start_app.bat)"),
         ("Daily routine: update data, paper trade, rebuild this page", "python -m scripts.daily_run"),
-        ("Only rebuild this page", "python -m scripts.build_dashboard"),
+        ("Status check", "python main.py"),
         ("Check the data", "python -m scripts.check_database_integrity"),
         ("Research: all strategy combinations", "python -m scripts.run_backtests"),
         ("Research: year by year / walk-forward", "python -m scripts.run_walk_forward"),
@@ -577,12 +675,10 @@ def render(data: DashboardData, nav_html: str = "") -> str:
         ("Run the tests", "python -m pytest -q"),
     ):
         add(f"<tr><td>{esc(what)}</td><td><code>{esc(cmd)}</code></td></tr>")
-    add("</table></div>")
+    add("</table></div></details>")
 
-    return (
-        "<!doctype html><html lang='en'><head><meta charset='utf-8'>"
-        "<meta name='viewport' content='width=device-width, initial-scale=1'>"
-        "<title>BTC Trading Dashboard</title>"
-        f"<style>{CSS}</style></head><body><main>{''.join(out)}</main>"
-        f"<script>{SCRIPT}</script></body></html>"
+    return page(
+        "BTC Trading - Overview",
+        f"{nav_html}<main>{''.join(out)}</main>",
+        scripts=f"<script>{SCRIPT}</script>",
     )

@@ -124,7 +124,7 @@ class TestServer(unittest.TestCase):
         status, page = self.get("/")
         self.assertEqual(status, 200)
         self.assertIn("run-btn", page)
-        self.assertIn("4. Your data", page)
+        self.assertIn("<h2>Your data</h2>", page)
 
         status, page = self.get("/chart")
         self.assertEqual(status, 200)

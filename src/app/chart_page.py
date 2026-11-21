@@ -6,7 +6,7 @@ The chart uses TradingView's open-source Lightweight Charts library
 live, streaming prices, so a live mode can be added on top later.
 """
 
-from src.reporting.dashboard import CSS
+from src.reporting.dashboard import FAVICON, page
 
 
 CHART_LIBRARY = (
@@ -16,13 +16,17 @@ CHART_LIBRARY = (
 
 NAV_CSS = """
 .app-nav { position: sticky; top: 0; z-index: 10; display: flex; flex-wrap: wrap; align-items: center;
-  gap: 8px 20px; padding: 10px 16px; background: var(--card); border-bottom: 1px solid var(--border); }
-.app-nav .brand { font-weight: 700; }
-.app-nav a { color: var(--text-secondary); text-decoration: none; padding: 4px 2px; border-bottom: 2px solid transparent; }
-.app-nav a.active { color: var(--text-primary); border-bottom-color: var(--series-1); }
+  gap: 8px 6px; padding: 10px 16px; background: color-mix(in srgb, var(--card) 88%, transparent);
+  backdrop-filter: saturate(1.4) blur(10px); border-bottom: 1px solid var(--border); }
+.app-nav .brand { display: inline-flex; align-items: center; gap: 8px; font-weight: 700; margin-right: 14px; }
+.app-nav .brand img { width: 22px; height: 22px; }
+.app-nav a { color: var(--text-secondary); text-decoration: none; padding: 6px 12px; border-radius: 999px; font-size: 14px; }
+.app-nav a:hover { background: var(--grid); text-decoration: none; }
+.app-nav a.active { color: var(--text-primary); background: var(--grid); font-weight: 600; }
 .app-nav .spacer { flex: 1; }
-.app-nav button { font: inherit; padding: 6px 12px; border-radius: 8px; border: 1px solid var(--border);
-  background: var(--series-1); color: #fff; cursor: pointer; }
+.app-nav button { font: inherit; font-size: 14px; font-weight: 600; padding: 7px 14px; border-radius: 999px; border: 0;
+  background: var(--series-1); color: #fff; cursor: pointer; box-shadow: var(--shadow); }
+.app-nav button:hover { filter: brightness(1.08); }
 .app-nav button:disabled { opacity: .6; cursor: progress; }
 .run-status { color: var(--text-muted); font-size: 13px; }
 select { font: inherit; padding: 5px 8px; border-radius: 8px; border: 1px solid var(--border);
@@ -63,7 +67,7 @@ def nav_html(active: str) -> str:
         return f"<a href='{href}'{cls}>{name}</a>"
 
     return (
-        "<nav class='app-nav'><span class='brand'>BTC Trading</span>"
+        f"<nav class='app-nav'><span class='brand'><img src=\"{FAVICON}\" alt=''>BTC Trading</span>"
         + link("/", "Overview", "overview") + link("/chart", "Chart", "chart")
         + link("/strategy", "Strategy tester", "strategy")
         + "<span class='spacer'></span><span class='run-status' id='run-status'></span>"
@@ -346,19 +350,16 @@ CHART_SCRIPT = r"""
 
 
 def chart_page() -> str:
-    return (
-        "<!doctype html><html lang='en'><head><meta charset='utf-8'>"
-        "<meta name='viewport' content='width=device-width, initial-scale=1'>"
-        "<title>BTC Chart</title>"
-        f"<style>{CSS}{NAV_CSS}{CHART_CSS}</style></head><body>"
-        + nav_html("chart")
+    return page(
+        "BTC Trading - Chart",
+        nav_html("chart")
         + "<div class='toolbar'><div class='seg' id='tf' role='group' aria-label='Timeframe'></div>"
         "<div class='toggles' id='toggles'></div>"
         "<label class='secondary' style='font-size:14px'>Trades: <select id='trade-source'></select></label></div>"
         "<div id='chart-wrap'><div id='readout'></div><div id='chart'></div></div>"
         "<div class='note'>Scroll or drag to move back in time (older candles load automatically), "
         "pinch or mouse wheel to zoom. Grey candles contain hours filled in from another exchange "
-        "(Kraken outage). Times in UTC. Chart by TradingView Lightweight Charts.</div>"
-        f"<script src='{CHART_LIBRARY}'></script>"
-        f"<script>{NAV_SCRIPT}{CHART_SCRIPT}</script></body></html>"
+        "(Kraken outage). Times in UTC. Chart by TradingView Lightweight Charts.</div>",
+        head=f"<style>{NAV_CSS}{CHART_CSS}</style>",
+        scripts=f"<script src='{CHART_LIBRARY}'></script><script>{NAV_SCRIPT}{CHART_SCRIPT}</script>",
     )

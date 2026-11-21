@@ -71,7 +71,7 @@ class TestDashboardPage(unittest.TestCase):
 
             page = render(gather(repository, history, store, now=START + timedelta(days=60)))
             self.assertIn("No paper account yet", page)
-            self.assertIn("4. Your data", page)
+            self.assertIn("<h2>Your data</h2>", page)
 
             store.create_account("test", "1d", 10_000.0, START)
             page = render(gather(repository, history, store, now=START + timedelta(days=60)))
