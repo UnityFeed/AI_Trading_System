@@ -35,6 +35,8 @@ Run scripts as modules (`-m scripts.name`, no `.py`) because imports start with 
 - Largest cross-exchange price differences: `python -m scripts.inspect_exchange_price_outliers`
 - Daily candle check (needs internet) and 4h/1d counts: `python -m scripts.compare_daily_candles`
 - Indicators on the primary history, 1h/4h/1d: `python -m scripts.report_indicators`
+- Missing Kraken hours since 2017 and whether Kraken has trades for them
+  (needs internet): `python -m scripts.check_kraken_gaps`
 
 ## Architecture (keep it; do not redesign without a clear reason)
 - `src/data_collection/`: `MarketData` dataclass, `data_validator`, `MarketDataProvider`
@@ -112,6 +114,10 @@ Kraken check limited to its last 720 days). Primary history: 1h ~114,861 clean,
 4h 28,698, 1d 4,768 candles; 23 days skipped in 13 years.
 Step 3 done: indicators cross-checked against an independent pandas calculation
 on 3,000 real Coinbase hourly candles (1h and 4h): identical to float precision.
+Owner ran `report_indicators` 21 Nov 2026; latest 1d close (2026-11-20, 58,806.30)
+equals Kraken's own daily close (live charts differ only by the forming candle).
+Fully warmed-up rows: 1h kraken 83,592/86,593 (20 runs), 4h 18,773/21,634
+(16 runs), 1d 1,350/3,593 (15 runs); bitstamp 1d 523/1,175 (5 runs).
 
 Step 0 results (owner ran on PC, 21 Nov 2026, data current to 2026-11-21 11:00 UTC;
 SQLite integrity ok, 0 duplicates, 0 invalid OHLCV, 0 non-aligned timestamps):
@@ -144,6 +150,12 @@ Known issues:
    (no exclusions, zero-volume included), so their maxima include known issues.
 5. `calculate_hourly_sma` and the SMA crossover strategy are still hourly-only
    (`period_hours`); generalise when the backtester needs other timeframes.
+6. Daily warm-up loss: each skipped day restarts all indicators, so EMA 200 on
+   1d is only ready on 1,350 of 3,593 Kraken days. Next: owner runs
+   `check_kraken_gaps`; gaps with Kraken trades can be rebuilt with
+   `HistoricalBackfillService` (DB write: back up first, owner approval).
+   For true outages, an owner decision is needed on whether indicators may
+   bridge short gaps (would change the "reset across gaps" rule).
 
 ## Roadmap (do in order)
 0. [DONE 21 Nov 2026] Data updated and verified (see Status). Bitstamp filler
