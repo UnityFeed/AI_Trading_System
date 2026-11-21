@@ -16,6 +16,10 @@ volume) that marks good moments to BUY and to SELL, using every indicator to
 time those moments. A pattern only counts when it holds on years it was not
 chosen on, after Kraken's real fees and slippage, compared with buy-and-hold.
 
+**Current priority (owner, 21 Nov 2026):** a finished, usable product first:
+show what the owner does (paper account), what the data is, and where to
+work from. Finding a winning strategy is parked for later (roadmap step 9).
+
 Long-term: multi-exchange data, market-structure analysis, calibrated scenario
 probabilities, deterministic risk controls, paper trading, and only after
 validation consider automated execution.
@@ -32,6 +36,11 @@ validation consider automated execution.
 ## Common commands (PowerShell, from the project root)
 Run scripts as modules (`-m scripts.name`, no `.py`) because imports start with `src.`.
 - Activate venv: `.venv\Scripts\Activate.ps1` (then `python` = venv python)
+- DAILY ROUTINE (update data, paper trade, rebuild dashboard):
+  `python -m scripts.daily_run` (`--open` opens the page; `--skip-update`;
+  first run only: `--start YYYY-MM-DD`, default 1 Jan of this year)
+- Dashboard only: `python -m scripts.build_dashboard --open` -> `reports/dashboard.html`
+- Stop new paper buys: `New-Item database\STOP_PAPER_TRADING` (delete it to resume)
 - Tests: `python -m pytest -q`
 - Fetch latest candles for all 3 exchanges: `python -m scripts.update_all_exchanges`
   (forward-only from each exchange's latest stored candle; Kraken's OHLC API only
@@ -75,11 +84,20 @@ Run scripts as modules (`-m scripts.name`, no `.py`) because imports start with 
   `record_equity`), `search.py` (all 540 combinations, selection/test windows,
   ranking), `walk_forward.py` (one continuous run per combination summarised per
   year; yearly walk-forward picks chosen only on earlier years)
+- `src/paper_trading/`: `store.py` (`PaperTradingStore`, own SQLite file
+  `database/paper_trading.db`: account, append-only decisions and fills),
+  `trader.py` (`PaperTrader`, `ACTIVE_STRATEGY` = candidate 1 on 1d, $10,000
+  start, safety checks: stale data, kill switch)
+- `src/reporting/dashboard.py`: `gather` + `render` -> one self-contained HTML
+  page (paper account, strategy state, market readings 1d/4h/1h, data status,
+  research summary, commands); inline SVG charts with hover readout,
+  light/dark theme
 - `src/risk_management/`, `src/execution/`: empty packages (not started)
 - `scripts/`: import, update, integrity, comparison and anomaly tools
 - `tests/`: data layer, collector, SMA, returns, SMA crossover, data quality,
   primary history, continuous history, timeframes, daily comparison,
-  technical indicators, Kraken gap finder, backtesting engine/search, walk-forward
+  technical indicators, Kraken gap finder, backtesting engine/search, walk-forward,
+  paper trading, dashboard
   (also guards the real `confirmed_anomalies.csv` against format errors).
   `tests/helpers.py` has `hourly_candles()` for building test candles.
 
@@ -130,6 +148,14 @@ open, high, low, close, volume. DB primary key:
   Value stamped T uses candles up to and including period T (known at T's
   close). EMA seeded with SMA; RSI and ATR use Wilder smoothing; Bollinger uses
   population std; relative volume divides by the average of the PREVIOUS n.
+- Paper trading: separate database file (never touches market_data.db). One
+  decision per completed candle of the strategy timeframe (BUY/SELL/HOLD/WAIT/
+  PENDING/SKIP) with a snapshot of indicators and rule states; decisions and
+  fills are append-only, never edited. Orders fill at the first tradeable hour
+  after the decision candle (same tradeability rules as backtests), with the
+  backtest costs. Safety checks only ever BLOCK trades: stale data (> 3 h)
+  stops processing; kill switch file blocks new buys. Switching strategy
+  requires an explicit account reset (no silent switch).
 - Deterministic rules, statistics and trained models form the core; no paid LLM
   call per trade decision. The risk engine must have veto power over any signal.
 - Every future prediction must be timestamped and stored, never rewritten
@@ -255,6 +281,13 @@ Step 5c CONFIRMED on the owner's real DB (`run_walk_forward`, fee 0.80%,
 - Un-excluding 2017-05-07 mattered: candidate 3 in 2017 went from +253% to
   +727% (the fake spike had triggered a bad trade).
 
+Product (roadmap step 6) built 21 Nov 2026, 189 tests pass: paper trader,
+dashboard, `daily_run`. Checked in the cloud on the test DB topped up to
+2026-11-21 15:00: replay from 2026-01-01 gave 1 trade (buy 2026-09-22 at
+86,638, sell 2026-10-15 at 81,525), -7.4%, same as the backtest's -7.4% for
+candidate 1 in 2026; page renders without errors in light, dark and 390 px
+phone width. Owner still to run `daily_run` on the PC.
+
 Step 0 results (owner ran on PC, 21 Nov 2026, data current to 2026-11-21 11:00 UTC;
 SQLite integrity ok, 0 duplicates, 0 invalid OHLCV, 0 non-aligned timestamps):
 | exchange | first candle      | candles | missing hours |
@@ -325,11 +358,18 @@ Known issues:
       exposure.
    d. Limit-order (maker fee) execution model, since fees decide the 1h/4h result.
    e. Write the surviving rules down as a named strategy with tests.
-6. Risk engine (proposed paper values, not approved: 0.5% risk per trade, 2% max
+6. [DONE 21 Nov 2026] Usable product v1: paper trader following the best
+   daily rule, dashboard page, one-command daily routine (see commands).
+7. Product polish (next): schedule `daily_run` automatically (Windows Task
+   Scheduler), show more history and trade statistics on the dashboard, fix
+   known issue 1 (`main.py`), notifications on new decisions.
+8. Risk engine (proposed paper values, not approved: 0.5% risk per trade, 2% max
    daily loss, 5 positions, 2.5% aggregate open risk, no leverage, stop required,
-   emergency shutdown), then paper-trading loop with the chosen strategy.
-7. Regime detection, historical analogues, scenario engine, probability
-   calibration, prediction log, ML. Only after the data foundation is validated.
+   emergency shutdown) with veto power over the paper trader.
+9. PARKED (owner, 21 Nov 2026): strategy research, roadmap 5b-5e (wider
+   building blocks, random-entry baseline, limit-order fills, hold-by-default
+   variant), then regime detection, historical analogues, scenario engine,
+   probability calibration, prediction log, ML.
 
 ## How to work with the owner
 - Beginner: explain important decisions (timestamps, pagination, validation,
