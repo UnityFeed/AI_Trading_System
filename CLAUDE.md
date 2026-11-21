@@ -37,6 +37,8 @@ Run scripts as modules (`-m scripts.name`, no `.py`) because imports start with 
 - Indicators on the primary history, 1h/4h/1d: `python -m scripts.report_indicators`
 - Missing Kraken hours since 2017 and whether Kraken has trades for them
   (needs internet): `python -m scripts.check_kraken_gaps`
+- Continuous history: filled hours, remaining gaps, jumps between exchanges:
+  `python -m scripts.report_continuous_history`
 
 ## Architecture (keep it; do not redesign without a clear reason)
 - `src/data_collection/`: `MarketData` dataclass, `data_validator`, `MarketDataProvider`
@@ -48,14 +50,16 @@ Run scripts as modules (`-m scripts.name`, no `.py`) because imports start with 
   MACD 12/26/9, Bollinger 20/2, ATR 14, volume SMA / relative volume 20; any
   timeframe), `returns.py` (`calculate_returns(candles, timeframe)`), `market_data_quality.py`
   (`get_clean_candles` applies `data/quality/confirmed_anomalies.csv` exclusions
-  and skips zero-volume candles), `primary_history.py` (Bitstamp <2017, Kraken 2017+),
+  and skips zero-volume candles), `primary_history.py` (Bitstamp <2017, Kraken 2017+;
+  `get_continuous_history` gap-filled series, `get_primary_history` segments),
   `timeframes.py` (`aggregate_hourly_candles`: 1h -> 4h/1d; `split_into_runs`:
   consecutive-candle runs for any timeframe), `daily_comparison.py`
 - `src/strategies/sma_crossover.py`: long-only crossover signals
 - `src/risk_management/`, `src/execution/`: empty packages (not started)
 - `scripts/`: import, update, integrity, comparison and anomaly tools
 - `tests/`: data layer, collector, SMA, returns, SMA crossover, data quality,
-  primary history, timeframes, daily comparison, technical indicators
+  primary history, continuous history, timeframes, daily comparison,
+  technical indicators, Kraken gap finder
   (also guards the real `confirmed_anomalies.csv` against format errors).
   `tests/helpers.py` has `hourly_candles()` for building test candles.
 
@@ -65,17 +69,25 @@ open, high, low, close, volume. DB primary key:
 
 ## Decisions already made (do not reverse)
 - Kraken is primary; Bitstamp and Coinbase are independent validation sources.
-- NEVER merge exchange candles into one synthetic series. Never overwrite one
-  exchange's rows with another's.
-- Primary history (owner decision 21 Nov 2026): Bitstamp before 2017-01-01,
-  Kraken from 2017-01-01 (first full-coverage Kraken year). Use
-  `get_primary_history` (`src/analysis/primary_history.py`). It returns separate
-  single-exchange segments, never one merged list: run indicators/returns/
-  backtests per segment, so the switch-over acts as a gap. Nothing is copied in
-  the DB. Report backtest results per segment as well as combined. Always pass `exchange=` explicitly (repository
-  defaults to "kraken" only for backward compatibility).
-- Do NOT fill missing hours with fabricated candles. Preserve gaps. Rolling windows
-  and returns reset or skip across gaps. Do not train sequences across gaps.
+- Never merge or overwrite exchanges in the DATABASE: each exchange's rows stay
+  its own. Always pass `exchange=` explicitly (repository defaults to "kraken"
+  only for backward compatibility).
+- Primary history (owner decisions 21 Nov 2026): Bitstamp before 2017-01-01,
+  Kraken from 2017-01-01. Two views in `src/analysis/primary_history.py`:
+  - `get_continuous_history` (DEFAULT for indicators/research/backtests): one
+    unbroken in-memory series. Hours the primary exchange lacks (outages,
+    excluded or zero-volume candles) are filled with the real clean candle of
+    another exchange: Kraken period -> Coinbase, then Bitstamp; Bitstamp period
+    -> Coinbase, then Kraken. Candles are relabelled `exchange="primary"`; the
+    true source per hour is in `.sources`, substitutions in
+    `.substituted_hours()`, every switch between exchanges with its price jump
+    in `.source_changes` (`.large_jumps()` > 1%). Hours no exchange has stay gaps.
+  - `get_primary_history`: separate single-exchange segments with real gaps,
+    for validation and anything that must reflect one exchange only.
+- Backtests must NOT fill orders on substituted hours (the primary exchange was
+  down; nobody could trade there). Signals may use them.
+- Never fabricate candles: no interpolation or forward-fill. Gaps that no
+  exchange covers stay gaps; rolling windows and returns reset there.
 - Flag suspicious data (see `confirmed_anomalies.csv`); do not silently delete.
   Only `analysis_action` values starting with `exclude` remove a candle from
   analysis; `keep` (reviewed, genuine) and `review_pending` are notes only.
@@ -91,7 +103,8 @@ open, high, low, close, volume. DB primary key:
   sum of their 24 hourly candles exactly. Kraken's daily OHLC API only serves
   the last 720 days; Bitstamp and Coinbase serve full daily history.
 - Indicators: computed per run of consecutive candles (`split_into_runs`), so
-  they restart at every gap and at the exchange switch; None until warmed up.
+  they restart at every remaining gap; None until warmed up. On the continuous
+  history they run straight through filled hours and the 2017 switch.
   Value stamped T uses candles up to and including period T (known at T's
   close). EMA seeded with SMA; RSI and ATR use Wilder smoothing; Bollinger uses
   population std; relative volume divides by the average of the PREVIOUS n.
@@ -118,6 +131,9 @@ Owner ran `report_indicators` 21 Nov 2026; latest 1d close (2026-11-20, 58,806.3
 equals Kraken's own daily close (live charts differ only by the forming candle).
 Fully warmed-up rows: 1h kraken 83,592/86,593 (20 runs), 4h 18,773/21,634
 (16 runs), 1d 1,350/3,593 (15 runs); bitstamp 1d 523/1,175 (5 runs).
+`check_kraken_gaps` (owner, 21 Nov 2026): all 18 Kraken gaps since 2017
+(82 h: Jan 2018 ~50 h, rest 1-5 h) have no Kraken trades at all = real
+outages/maintenance; nothing to rebuild. Hence the continuous history.
 
 Step 0 results (owner ran on PC, 21 Nov 2026, data current to 2026-11-21 11:00 UTC;
 SQLite integrity ok, 0 duplicates, 0 invalid OHLCV, 0 non-aligned timestamps):
@@ -150,12 +166,11 @@ Known issues:
    (no exclusions, zero-volume included), so their maxima include known issues.
 5. `calculate_hourly_sma` and the SMA crossover strategy are still hourly-only
    (`period_hours`); generalise when the backtester needs other timeframes.
-6. Daily warm-up loss: each skipped day restarts all indicators, so EMA 200 on
-   1d is only ready on 1,350 of 3,593 Kraken days. Next: owner runs
-   `check_kraken_gaps`; gaps with Kraken trades can be rebuilt with
-   `HistoricalBackfillService` (DB write: back up first, owner approval).
-   For true outages, an owner decision is needed on whether indicators may
-   bridge short gaps (would change the "reset across gaps" rule).
+6. Volume differs a lot between exchanges (Coinbase daily volume ~3x Kraken),
+   so volume features (`volume_sma_20`, `relative_volume_20`) are distorted on
+   and just after filled hours and around the 2017 switch. Price indicators are
+   barely affected (typical price difference 0.15-0.22%).
+7. Owner to run `report_continuous_history` on the real DB and review jumps > 1%.
 
 ## Roadmap (do in order)
 0. [DONE 21 Nov 2026] Data updated and verified (see Status). Bitstamp filler

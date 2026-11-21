@@ -11,10 +11,18 @@ runs on each segment on its own, so the switch-over behaves like a gap
 Each segment contains clean candles only (see get_clean_candles): the
 exclusion list is applied and zero-volume filler candles are skipped.
 Nothing in the database is changed or copied.
+
+Two ways to read it:
+- get_primary_history: separate single-exchange segments with real gaps.
+  Use it for validation and anything that must reflect one exchange.
+- get_continuous_history: one unbroken series in which missing hours are
+  filled from other exchanges, with every substitution and every price
+  jump between sources recorded (owner decision, 21 Nov 2026). Use it for
+  indicators and research that need long uninterrupted history.
 """
 
-from dataclasses import dataclass
-from datetime import datetime, timezone
+from dataclasses import dataclass, replace
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from src.analysis.market_data_quality import (
@@ -103,3 +111,173 @@ def get_primary_history(
         )
 
     return segments
+
+
+# ---------------------------------------------------------------------------
+# Continuous history (owner decision 21 Nov 2026)
+# ---------------------------------------------------------------------------
+#
+# One unbroken series from the first Bitstamp hour to the latest Kraken
+# hour, so indicators can run from start to finish. Hours the primary
+# exchange does not have (outages, excluded bad candles, zero-volume
+# filler) are taken from another exchange, in FILL_ORDER. Every candle
+# records which exchange it really came from, and every change of source
+# is recorded with its price jump so large differences stay visible.
+#
+# The series is built in memory only. Candles are relabelled with the
+# exchange name "primary" so the single-exchange checks in the analysis
+# code accept them; the true source is in ContinuousHistory.sources.
+#
+# Substituted candles are NOT Kraken prices. A backtest must not fill an
+# order on a substituted hour (Kraken was down, nobody could trade there).
+
+PRIMARY_LABEL = "primary"
+
+FILL_ORDER = {
+    "bitstamp": ("coinbase", "kraken"),
+    "kraken": ("coinbase", "bitstamp"),
+}
+
+LARGE_JUMP_PCT = 1.0
+
+_HOUR = timedelta(hours=1)
+
+
+@dataclass(frozen=True)
+class SourceChange:
+    """The price step where the series switches from one exchange to another."""
+
+    timestamp: datetime  # first hour from the new source
+    from_exchange: str
+    to_exchange: str
+    previous_close: float
+    open: float
+
+    @property
+    def jump_pct(self) -> float:
+        return (self.open / self.previous_close - 1.0) * 100.0
+
+
+@dataclass(frozen=True)
+class ContinuousHistory:
+    candles: list[MarketData]  # exchange == PRIMARY_LABEL, oldest first
+    sources: dict[datetime, str]  # timestamp -> real exchange
+    primary_by_hour: dict[datetime, str]  # timestamp -> exchange that should have provided it
+    source_changes: list[SourceChange]
+    unfilled_hours: list[datetime]  # no exchange had a clean candle
+
+    def is_substituted(self, timestamp: datetime) -> bool:
+        return self.sources[timestamp] != self.primary_by_hour[timestamp]
+
+    def substituted_hours(self) -> list[datetime]:
+        return [c.timestamp for c in self.candles if self.is_substituted(c.timestamp)]
+
+    def large_jumps(self, threshold_pct: float = LARGE_JUMP_PCT) -> list[SourceChange]:
+        return [
+            change for change in self.source_changes
+            if abs(change.jump_pct) > threshold_pct
+        ]
+
+    def periods_with_substitutes(self, timeframe: str) -> set[datetime]:
+        """Start of every 1h/4h/1d period that contains a substituted hour."""
+        from src.analysis.timeframes import period_start
+
+        return {
+            period_start(timestamp, timeframe)
+            for timestamp in self.substituted_hours()
+        }
+
+
+def get_continuous_history(
+    repository: MarketDataRepository,
+    start: datetime,
+    end: datetime,
+    symbol: str = "BTC/USD",
+    market: str = "crypto",
+    exclusions_file: str | Path = DEFAULT_EXCLUSIONS_FILE,
+) -> ContinuousHistory:
+    """
+    Build the continuous hourly history between start and end.
+
+    Each primary-history segment runs from its exchange's first to its last
+    clean candle inside the window; missing hours in between are filled
+    from FILL_ORDER. Hours no exchange has stay missing (unfilled_hours).
+    """
+
+    segments = get_primary_history(
+        repository=repository,
+        start=start,
+        end=end,
+        symbol=symbol,
+        market=market,
+        exclusions_file=exclusions_file,
+    )
+
+    candles: list[MarketData] = []
+    sources: dict[datetime, str] = {}
+    primary_by_hour: dict[datetime, str] = {}
+    unfilled: list[datetime] = []
+
+    for segment in segments:
+
+        if not segment.candles:
+            continue
+
+        by_exchange = {
+            segment.exchange: {c.timestamp: c for c in segment.candles}
+        }
+
+        for fill_exchange in FILL_ORDER[segment.exchange]:
+            fill_candles = get_clean_candles(
+                repository=repository,
+                symbol=symbol,
+                market=market,
+                timeframe="1h",
+                start=segment.start,
+                end=segment.end,
+                exchange=fill_exchange,
+                exclusions_file=exclusions_file,
+            )
+            by_exchange[fill_exchange] = {c.timestamp: c for c in fill_candles}
+
+        order = (segment.exchange,) + FILL_ORDER[segment.exchange]
+        hour = segment.candles[0].timestamp
+        last = segment.candles[-1].timestamp
+
+        while hour <= last:
+            for exchange in order:
+                candle = by_exchange[exchange].get(hour)
+                if candle is not None:
+                    candles.append(replace(candle, exchange=PRIMARY_LABEL))
+                    sources[hour] = exchange
+                    primary_by_hour[hour] = segment.exchange
+                    break
+            else:
+                unfilled.append(hour)
+
+            hour += _HOUR
+
+    changes = []
+
+    for previous, candle in zip(candles, candles[1:]):
+        before = sources[previous.timestamp]
+        after = sources[candle.timestamp]
+
+        if before != after and candle.timestamp - previous.timestamp == _HOUR:
+            changes.append(
+                SourceChange(
+                    timestamp=candle.timestamp,
+                    from_exchange=before,
+                    to_exchange=after,
+                    previous_close=previous.close,
+                    open=candle.open,
+                )
+            )
+
+    return ContinuousHistory(
+        candles=candles,
+        sources=sources,
+        primary_by_hour=primary_by_hour,
+        source_changes=changes,
+        unfilled_hours=unfilled,
+    )
