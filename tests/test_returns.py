@@ -2,7 +2,8 @@ import unittest
 from dataclasses import replace
 from datetime import datetime, timedelta
 
-from src.analysis.returns import calculate_hourly_returns
+from src.analysis.returns import calculate_hourly_returns, calculate_returns
+from src.analysis.timeframes import aggregate_hourly_candles
 from tests.helpers import BASE_TIME, hourly_candles
 
 
@@ -92,6 +93,32 @@ class TestCalculateHourlyReturns(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             calculate_hourly_returns(candles)
+
+
+class TestCalculateReturnsForLongerTimeframes(unittest.TestCase):
+
+    def test_daily_returns_skip_missing_days(self):
+
+        # Day closes: 100, 110, (day 2 missing an hour), 121, 133.1
+        closes = []
+        for day_close in (100, 110, 999, 121, 133.1):
+            closes += [day_close] * 24
+
+        hourly = hourly_candles(closes, skip_hours={2 * 24 + 5})
+        daily = aggregate_hourly_candles(hourly, "1d").candles
+
+        returns = calculate_returns(daily, "1d")
+
+        self.assertEqual(
+            [r.timestamp for r in returns],
+            [BASE_TIME + timedelta(days=1), BASE_TIME + timedelta(days=4)],
+        )
+        self.assertTrue(all(abs(r.return_pct - 10.0) < 1e-9 for r in returns))
+
+    def test_unknown_timeframe_is_rejected(self):
+
+        with self.assertRaises(ValueError):
+            calculate_returns(hourly_candles([1, 2]), "2h")
 
 
 if __name__ == "__main__":

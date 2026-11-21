@@ -2,7 +2,11 @@ import unittest
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
-from src.analysis.timeframes import aggregate_hourly_candles, period_start
+from src.analysis.timeframes import (
+    aggregate_hourly_candles,
+    period_start,
+    split_into_runs,
+)
 from tests.helpers import BASE_TIME, hourly_candles
 
 
@@ -178,6 +182,47 @@ class TestAggregateHourlyCandles(unittest.TestCase):
         for candles in (unaligned, naive):
             with self.assertRaises(ValueError):
                 aggregate_hourly_candles(candles, "1d")
+
+
+class TestSplitIntoRuns(unittest.TestCase):
+
+    def test_consecutive_candles_form_one_run(self):
+
+        runs = split_into_runs(varied_candles(5), "1h")
+
+        self.assertEqual([len(run) for run in runs], [5])
+
+    def test_gaps_start_new_runs(self):
+
+        candles = hourly_candles(list(range(10)), skip_hours={3, 4, 7})
+
+        runs = split_into_runs(list(reversed(candles)), "1h")
+
+        self.assertEqual([len(run) for run in runs], [3, 2, 2])
+        self.assertEqual(runs[1][0].timestamp, BASE_TIME.replace(hour=5))
+
+    def test_daily_runs(self):
+
+        days = aggregate_hourly_candles(
+            varied_candles(24 * 4), "1d"
+        ).candles
+        del days[2]
+
+        runs = split_into_runs(days, "1d")
+
+        self.assertEqual([len(run) for run in runs], [2, 1])
+
+    def test_candles_not_on_period_start_are_rejected(self):
+
+        with self.assertRaises(ValueError):
+            split_into_runs(varied_candles(3), "1d")
+
+    def test_empty_and_unknown_timeframe(self):
+
+        self.assertEqual(split_into_runs([], "4h"), [])
+
+        with self.assertRaises(ValueError):
+            split_into_runs(varied_candles(2), "2h")
 
 
 if __name__ == "__main__":

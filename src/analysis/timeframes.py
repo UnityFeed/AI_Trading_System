@@ -61,7 +61,8 @@ def period_start(timestamp: datetime, timeframe: str) -> datetime:
     )
 
 
-def _validate_hourly(candles: list[MarketData]) -> list[MarketData]:
+def _validate_candles(candles: list[MarketData]) -> list[MarketData]:
+    """Sort and check: one exchange/symbol, tz-aware, hour-aligned, unique."""
 
     ordered = sorted(candles, key=lambda candle: candle.timestamp)
     first = ordered[0]
@@ -81,7 +82,7 @@ def _validate_hourly(candles: list[MarketData]) -> list[MarketData]:
             or candle.timestamp.microsecond
         ):
             raise ValueError(
-                f"Hourly candle is not aligned to a full hour: "
+                f"Candle is not aligned to a full hour: "
                 f"{candle.timestamp.isoformat()}"
             )
 
@@ -120,7 +121,7 @@ def aggregate_hourly_candles(
         return AggregationResult(timeframe, [], [])
 
     hours_expected = TIMEFRAME_HOURS[timeframe]
-    ordered = _validate_hourly(candles)
+    ordered = _validate_candles(candles)
 
     # Group the hours by the period they belong to (in time order).
     periods: dict[datetime, list[MarketData]] = {}
@@ -166,3 +167,43 @@ def aggregate_hourly_candles(
         candles=derived,
         incomplete_periods=incomplete,
     )
+
+
+def split_into_runs(
+    candles: list[MarketData],
+    timeframe: str,
+) -> list[list[MarketData]]:
+    """
+    Split candles of one timeframe into runs of consecutive candles.
+
+    A new run starts wherever the next candle is not exactly one period
+    after the previous one (a missing, excluded or skipped period).
+    Indicators are calculated per run, so no value is ever computed
+    across a gap.
+    """
+
+    if timeframe not in TIMEFRAME_HOURS:
+        raise ValueError(f"Unsupported timeframe: {timeframe}")
+
+    if not candles:
+        return []
+
+    step = timedelta(hours=TIMEFRAME_HOURS[timeframe])
+    ordered = _validate_candles(candles)
+
+    for candle in ordered:
+        if period_start(candle.timestamp, timeframe) != candle.timestamp:
+            raise ValueError(
+                f"Candle at {candle.timestamp.isoformat()} does not start "
+                f"a {timeframe} period."
+            )
+
+    runs = [[ordered[0]]]
+
+    for previous, candle in zip(ordered, ordered[1:]):
+        if candle.timestamp - previous.timestamp == step:
+            runs[-1].append(candle)
+        else:
+            runs.append([candle])
+
+    return runs

@@ -34,21 +34,26 @@ Run scripts as modules (`-m scripts.name`, no `.py`) because imports start with 
 - Per-year gaps and zero-volume candles: `python -m scripts.report_data_coverage`
 - Largest cross-exchange price differences: `python -m scripts.inspect_exchange_price_outliers`
 - Daily candle check (needs internet) and 4h/1d counts: `python -m scripts.compare_daily_candles`
+- Indicators on the primary history, 1h/4h/1d: `python -m scripts.report_indicators`
 
 ## Architecture (keep it; do not redesign without a clear reason)
 - `src/data_collection/`: `MarketData` dataclass, `data_validator`, `MarketDataProvider`
   interface, `MarketDataService` (one provider at a time), `MarketDataRepository`
   (SQLite, exchange-aware upsert), providers (Kraken, Bitstamp, Coinbase),
   `MarketDataCollector` (forward collection for Kraken), Kraken trades recovery
-- `src/analysis/`: `indicators.py` (SMA), `returns.py`, `market_data_quality.py`
+- `src/analysis/`: `indicators.py` (hourly SMA, used by the crossover strategy),
+  `technical_indicators.py` (`calculate_indicators`: EMA 20/50/200, RSI 14,
+  MACD 12/26/9, Bollinger 20/2, ATR 14, volume SMA / relative volume 20; any
+  timeframe), `returns.py` (`calculate_returns(candles, timeframe)`), `market_data_quality.py`
   (`get_clean_candles` applies `data/quality/confirmed_anomalies.csv` exclusions
   and skips zero-volume candles), `primary_history.py` (Bitstamp <2017, Kraken 2017+),
-  `timeframes.py` (`aggregate_hourly_candles`: 1h -> 4h/1d), `daily_comparison.py`
+  `timeframes.py` (`aggregate_hourly_candles`: 1h -> 4h/1d; `split_into_runs`:
+  consecutive-candle runs for any timeframe), `daily_comparison.py`
 - `src/strategies/sma_crossover.py`: long-only crossover signals
 - `src/risk_management/`, `src/execution/`: empty packages (not started)
 - `scripts/`: import, update, integrity, comparison and anomaly tools
 - `tests/`: data layer, collector, SMA, returns, SMA crossover, data quality,
-  primary history, timeframes, daily comparison
+  primary history, timeframes, daily comparison, technical indicators
   (also guards the real `confirmed_anomalies.csv` against format errors).
   `tests/helpers.py` has `hourly_candles()` for building test candles.
 
@@ -83,6 +88,11 @@ open, high, low, close, volume. DB primary key:
   live APIs: all three exchanges' daily candles start 00:00 UTC and equal the
   sum of their 24 hourly candles exactly. Kraken's daily OHLC API only serves
   the last 720 days; Bitstamp and Coinbase serve full daily history.
+- Indicators: computed per run of consecutive candles (`split_into_runs`), so
+  they restart at every gap and at the exchange switch; None until warmed up.
+  Value stamped T uses candles up to and including period T (known at T's
+  close). EMA seeded with SMA; RSI and ATR use Wilder smoothing; Bollinger uses
+  population std; relative volume divides by the average of the PREVIOUS n.
 - Deterministic rules, statistics and trained models form the core; no paid LLM
   call per trade decision. The risk engine must have veto power over any signal.
 - Every future prediction must be timestamped and stored, never rewritten
@@ -96,7 +106,12 @@ anomaly tooling, SMA, hourly returns, SMA crossover signals.
 21 Nov 2026: roadmap step 1 done (requirements.txt, collector tests rewritten for
 the forward-only collector, tests for SMA/returns/crossover). Step 2 code done
 (4h/1d derivation and daily check), tested on 20 days of live data from all three
-exchanges (exact match); full-history run on the real DB pending (owner).
+exchanges (exact match). Full-history run by owner 21 Nov 2026: 0 days off by
+more than 0.01% on any exchange (Kraken 717 days, Bitstamp 4,780, Coinbase 4,119;
+Kraken check limited to its last 720 days). Primary history: 1h ~114,861 clean,
+4h 28,698, 1d 4,768 candles; 23 days skipped in 13 years.
+Step 3 done: indicators cross-checked against an independent pandas calculation
+on 3,000 real Coinbase hourly candles (1h and 4h): identical to float precision.
 
 Step 0 results (owner ran on PC, 21 Nov 2026, data current to 2026-11-21 11:00 UTC;
 SQLite integrity ok, 0 duplicates, 0 invalid OHLCV, 0 non-aligned timestamps):
@@ -127,18 +142,17 @@ Known issues:
    107 h outage 5-9 Jan 2015); these stay gaps.
 4. `compare_exchange_data` and `inspect_exchange_price_outliers` read raw data
    (no exclusions, zero-volume included), so their maxima include known issues.
-5. `calculate_hourly_sma` and `calculate_hourly_returns` assume 1h spacing; make
-   them timeframe-generic in step 3 before using them on 4h/1d candles.
+5. `calculate_hourly_sma` and the SMA crossover strategy are still hourly-only
+   (`period_hours`); generalise when the backtester needs other timeframes.
 
 ## Roadmap (do in order)
 0. [DONE 21 Nov 2026] Data updated and verified (see Status). Bitstamp filler
    candles handled; outliers classified; primary history defined.
 1. [DONE 21 Nov 2026] Housekeeping: requirements.txt, fix collector tests, tests
    for SMA, returns and crossover.
-2. [CODE DONE 21 Nov 2026, owner to run `compare_daily_candles` on the real DB]
-   Derive 4h and 1d candles from clean hourly data, per primary-history segment (UTC boundaries, no partial
+2. [DONE 21 Nov 2026] Derive 4h and 1d candles from clean hourly data, per primary-history segment (UTC boundaries, no partial
    candles, gap-aware). Compare daily with exchange daily candles.
-3. Indicators: EMA 20/50/200, RSI, MACD, Bollinger, ATR, volume features.
+3. [DONE 21 Nov 2026] Indicators: EMA 20/50/200, RSI, MACD, Bollinger, ATR, volume features.
    Timeframe-generic, tested, reset across gaps, no look-ahead.
 4. Minimal backtester (next-candle fills, fees, slippage, vs buy-and-hold).
 5. Risk engine (proposed paper values, not approved: 0.5% risk per trade, 2% max
