@@ -31,6 +31,8 @@ Run scripts as modules (`-m scripts.name`, no `.py`) because imports start with 
   Kraken trades recovery instead)
 - Data checks: `python -m scripts.check_database_integrity`,
   `python -m scripts.check_latest_data`, `python -m scripts.compare_exchange_data`
+- Per-year gaps and zero-volume candles: `python -m scripts.report_data_coverage`
+- Largest cross-exchange price differences: `python -m scripts.inspect_exchange_price_outliers`
 
 ## Architecture (keep it; do not redesign without a clear reason)
 - `src/data_collection/`: `MarketData` dataclass, `data_validator`, `MarketDataProvider`
@@ -73,8 +75,16 @@ anomaly tooling, SMA, hourly returns, SMA crossover signals.
 21 Nov 2026: roadmap step 1 done (requirements.txt, collector tests rewritten for
 the forward-only collector, tests for SMA/returns/crossover; 78 tests pass).
 
-Data was last updated around 14 Nov 2026. Owner believes full history is loaded
-for all three exchanges; NOT yet verified (step 0 pending, owner runs it on PC).
+Step 0 results (owner ran on PC, 21 Nov 2026, data current to 2026-11-21 11:00 UTC;
+SQLite integrity ok, 0 duplicates, 0 invalid OHLCV, 0 non-aligned timestamps):
+| exchange | first candle      | candles | missing hours |
+| bitstamp | 2013-10-06 00:00  | 115,068 | 0             |
+| coinbase | 2015-07-20 21:00  |  99,344 | 55            |
+| kraken   | 2013-10-06 21:00  | 104,172 | 10,875 (largest gaps all 2013-2014) |
+Avg close difference between exchanges 0.13-0.22%. `compare_exchange_data` does
+NOT apply `confirmed_anomalies.csv`: its 171.96% (bitstamp/kraken) and 19.33%
+(coinbase/kraken) maxima are the known Kraken anomalies 2013-11-10 04:00 and
+2015-11-03 10:00 (difference is relative to the mean of the two closes).
 
 Known issues:
 1. `main.py` prints "Database: Connected" without testing the connection, and only
@@ -84,10 +94,18 @@ Known issues:
    was checked against docs (300-candle cap, columns time, low, high, open,
    close, volume, granularity 3600).
 3. No 4h/daily derivation exists yet.
+4. Bitstamp has 0 missing hours over 13 years, including its Jan 2015 outage:
+   it likely returns filler candles for hours without trades. Check with
+   `scripts.report_data_coverage` (zero-volume / flat candles). If so, flat
+   zero-volume candles must be treated as gaps, not real prices.
+5. Unexplained 8.97% bitstamp/coinbase close difference: find it with
+   `scripts.inspect_exchange_price_outliers` and classify it.
+6. Kraken's 10,875 missing hours: confirm with the per-year breakdown that they
+   are concentrated in thin early years (no trades = no candle).
 
 ## Roadmap (do in order)
-0. [PENDING, owner on PC] Update data, then verify: `check_database_integrity`,
-   `check_latest_data`, `compare_exchange_data`; report per-exchange coverage and gaps.
+0. [MOSTLY DONE 21 Nov 2026] Data updated and verified (see Status). Open: known
+   issues 4-6, run `report_data_coverage` and `inspect_exchange_price_outliers`.
 1. [DONE 21 Nov 2026] Housekeeping: requirements.txt, fix collector tests, tests
    for SMA, returns and crossover.
 2. Derive 4h and 1d candles from clean hourly data (UTC boundaries, no partial
