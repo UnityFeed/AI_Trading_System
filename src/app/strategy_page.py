@@ -37,6 +37,13 @@ PAGE_SCRIPT = r"""
   function money(v) { return v === null || v === undefined ? '-' : '$' + Number(v).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}); }
   function el(tag, text, cls) { var e = document.createElement(tag); if (text !== undefined) e.textContent = text; if (cls) e.className = cls; return e; }
   function day(iso) { return iso.slice(0, 10); }
+  // Remember the choices between visits (the nav link has no settings in it).
+  function remembered(key) { try { return localStorage.getItem('strategy-tester-' + key); } catch (e) { return null; } }
+  function remember(key, value) { try { localStorage.setItem('strategy-tester-' + key, value); } catch (e) {} }
+  function choose(select, wanted, fallback) {
+    select.value = wanted;
+    if (select.value !== String(wanted)) select.value = fallback;  // option no longer exists
+  }
 
   fetch('/api/strategies').then(function (r) { return r.json(); }).then(function (d) {
     strategies = d.strategies;
@@ -52,8 +59,10 @@ PAGE_SCRIPT = r"""
       var o = el('option', lev === 1 ? 'Off (no borrowing)' : lev + 'x (borrow ' + (lev - 1) + 'x your money)');
       o.value = lev; marginSelect.appendChild(o);
     });
-    strategySelect.value = params.get('strategy') || d.active;
-    if (!strategySelect.value) strategySelect.value = d.active;
+    // A link (?strategy=...) wins; otherwise the last choice; otherwise the active strategy.
+    choose(strategySelect, params.get('strategy') || remembered('strategy') || d.active, d.active);
+    choose(feeSelect, remembered('fee') || String(d.fees[0]), String(d.fees[0]));
+    choose(marginSelect, remembered('margin') || '1', '1');
     load();
   });
   strategySelect.addEventListener('change', load);
@@ -62,6 +71,7 @@ PAGE_SCRIPT = r"""
 
   function load() {
     var id = strategySelect.value;
+    remember('strategy', id); remember('fee', feeSelect.value); remember('margin', marginSelect.value);
     history.replaceState(null, '', '/strategy?strategy=' + encodeURIComponent(id));
     document.getElementById('status').textContent = 'Running the backtest over the full history...';
     fetch('/api/backtest?strategy=' + encodeURIComponent(id) + '&fee=' + feeSelect.value + '&leverage=' + marginSelect.value)

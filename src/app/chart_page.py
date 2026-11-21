@@ -123,6 +123,8 @@ CHART_SCRIPT = r"""
   var tf = params.get('tf') || load('chart-tf', '1d');
   if (['1h', '4h', '1d'].indexOf(tf) < 0) tf = '1d';
   var source = params.get('trades') || load('chart-trades', 'paper');
+  // Settings that arrived through a link are remembered like manual choices.
+  save('chart-tf', tf); save('chart-trades', source);
   var enabled = {};
   TOGGLES.forEach(function (t) { enabled[t[0]] = settings[t[0]] === undefined ? t[3] : settings[t[0]]; });
 
