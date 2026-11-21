@@ -30,13 +30,12 @@ from src.backtesting.engine import CostSettings
 from src.backtesting.market import build_market, untradeable_hours
 from src.backtesting.search import StrategySpec
 from src.paper_trading.store import PROJECT_ROOT, PaperTradingStore
+from src.strategies.registry import active_strategy
 
 
-# The rule the walk-forward kept choosing in 2022-2026 (see CLAUDE.md).
-ACTIVE_STRATEGY = StrategySpec(
-    "ema50>ema200", "macd_cross_up", "none", "ema20_cross_down_ema50", 2.0
-)
-ACTIVE_TIMEFRAME = "1d"
+# The strategy marked active in src/strategies/registry.py.
+ACTIVE_STRATEGY = active_strategy().spec
+ACTIVE_TIMEFRAME = active_strategy().timeframe
 STARTING_CASH = 10_000.0
 MAX_DATA_AGE = timedelta(hours=3)
 KILL_SWITCH = PROJECT_ROOT / "database" / "STOP_PAPER_TRADING"

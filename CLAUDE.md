@@ -38,7 +38,9 @@ Run scripts as modules (`-m scripts.name`, no `.py`) because imports start with 
 - THE APP (no terminal needed): double-click `start_app.bat` in the project
   folder. It runs `python -m scripts.run_app`: a local web server on
   http://127.0.0.1:8765 (this PC only) and opens the browser. Pages: Overview
-  (dashboard) and Chart (interactive). The button "Update data & run paper
+  (dashboard), Chart (interactive; "Trades" selector shows the paper account
+  or any strategy's full backtest) and Strategy tester (full-history backtest
+  of any strategy: vs buy-and-hold, per year, every trade, 0.80%/0.40% fees). The button "Update data & run paper
   trader" does the daily routine. Keep the black window open; close it to stop.
 - Activate venv: `.venv\Scripts\Activate.ps1` (then `python` = venv python)
 - DAILY ROUTINE (update data, paper trade, rebuild dashboard):
@@ -81,6 +83,9 @@ Run scripts as modules (`-m scripts.name`, no `.py`) because imports start with 
   `get_continuous_history` gap-filled series, `get_primary_history` segments),
   `timeframes.py` (`aggregate_hourly_candles`: 1h -> 4h/1d; `split_into_runs`:
   consecutive-candle runs for any timeframe), `daily_comparison.py`
+- `src/strategies/registry.py`: `STRATEGIES` (every known strategy: id, name,
+  timeframe, `StrategySpec`, plain-language description, origin) and
+  `ACTIVE_STRATEGY_ID` (followed by the paper trader)
 - `src/strategies/sma_crossover.py`: long-only crossover signals (older, hourly)
 - `src/backtesting/`: `market.py` (`build_market`: candles + indicators +
   which opens are tradeable), `conditions.py` (entry building blocks in three
@@ -88,7 +93,9 @@ Run scripts as modules (`-m scripts.name`, no `.py`) because imports start with 
   `engine.py` (`run_backtest`, `buy_and_hold`, `CostSettings`; optional
   `record_equity`), `search.py` (all 540 combinations, selection/test windows,
   ranking), `walk_forward.py` (one continuous run per combination summarised per
-  year; yearly walk-forward picks chosen only on earlier years)
+  year; yearly walk-forward picks chosen only on earlier years), `report.py`
+  (`strategy_report`: the standard full-history test for one strategy,
+  JSON-ready: summary, per year, trades, daily equity; trade markers)
 - `src/paper_trading/`: `store.py` (`PaperTradingStore`, own SQLite file
   `database/paper_trading.db`: account, append-only decisions and fills),
   `trader.py` (`PaperTrader`, `ACTIVE_STRATEGY` = candidate 1 on 1d, $10,000
@@ -103,7 +110,8 @@ Run scripts as modules (`-m scripts.name`, no `.py`) because imports start with 
   `chart_page.py` (chart page + shared nav bar; TradingView Lightweight Charts
   5.2.1 from jsDelivr, Apache 2.0: 1h/4h/1d, scroll back loads older chunks,
   toggles for EMA 20/50/200, Bollinger, trades, volume, RSI, MACD, ATR),
-  `server.py` (`AppState` caches history/series/dashboard; stdlib
+  `strategy_page.py` (Strategy tester page, log-scale equity chart),
+  `server.py` (`AppState` caches history/series/dashboard/markets/reports; stdlib
   ThreadingHTTPServer on 127.0.0.1; POST needs header `X-App-Action: 1`)
 - `src/data_collection/exchange_updater.py`: `update_all_exchanges(repository,
   log)` (moved from the script; `scripts/update_all_exchanges.py` is a wrapper)
@@ -112,7 +120,8 @@ Run scripts as modules (`-m scripts.name`, no `.py`) because imports start with 
 - `tests/`: data layer, collector, SMA, returns, SMA crossover, data quality,
   primary history, continuous history, timeframes, daily comparison,
   technical indicators, Kraken gap finder, backtesting engine/search, walk-forward,
-  paper trading, dashboard, app (chart data, server routes, button protection)
+  paper trading, dashboard, app (chart data, server routes, button protection),
+  strategy registry and report
   (also guards the real `confirmed_anomalies.csv` against format errors).
   `tests/helpers.py` has `hourly_candles()` for building test candles.
 
@@ -175,6 +184,14 @@ open, high, low, close, volume. DB primary key:
   market DB except through the daily routine (forward candle update). The chart
   library is the one external web dependency (pinned version, needs internet);
   Python code stays standard-library only.
+- EVERY strategy we find or build goes into `src/strategies/registry.py`
+  (owner requirement, 21 Nov 2026). That gives it the standard test
+  automatically: full-history backtest in the Strategy tester (vs buy-and-hold,
+  per year, every trade, both fee levels) and its trades on the chart. Always
+  show the full-history view next to the stricter walk-forward result, and
+  label the full-history view as optimistic when the years it covers were
+  used to choose the strategy. New building blocks go into
+  `src/backtesting/conditions.py` first, with tests.
 - Deterministic rules, statistics and trained models form the core; no paid LLM
   call per trade decision. The risk engine must have veto power over any signal.
 - Every future prediction must be timestamped and stored, never rewritten
@@ -310,6 +327,10 @@ App (roadmap step 7a) built 21 Nov 2026, 197 tests pass: `start_app.bat`,
 Overview + interactive Chart, button for the daily routine. Browser-tested in
 the cloud on the test DB (light, dark, 390 px phone, no JS errors; scrolling back
 on 4h loaded older chunks to 2024; the button ran a real update + paper step).
+Strategy tester built 21 Nov 2026, 203 tests pass: registry with the three
+step 5a daily candidates; report numbers equal the walk-forward script's
+(candidate 1 on the test DB: +21,024%, 33 trades, worst drop 67.8%, better
+than buy-and-hold in 6/14 years; its 2026 trade equals the paper account's).
 
 Step 0 results (owner ran on PC, 21 Nov 2026, data current to 2026-11-21 11:00 UTC;
 SQLite integrity ok, 0 duplicates, 0 invalid OHLCV, 0 non-aligned timestamps):
@@ -387,11 +408,13 @@ Known issues:
    a. [DONE 21 Nov 2026] Click-to-start app (`start_app.bat`), interactive chart
       over the full history (1h/4h/1d, all indicators, trades), button for the
       daily routine.
-   b. NEXT: LIVE MODE (owner wants the strategy on a live price chart): stream
+   b. [DONE 21 Nov 2026] Strategy tester page + strategy registry: every strategy
+      gets the full-history test and its trades on the chart.
+   c. NEXT: LIVE MODE (owner wants the strategy on a live price chart): stream
       Kraken's current price into the chart (forming candle updates every few
       seconds), show the strategy's rule checklist live, and alert when a rule
       is about to trigger at the close. Decisions stay on completed candles.
-   c. Schedule the daily routine automatically (Windows Task Scheduler), trade
+   d. Schedule the daily routine automatically (Windows Task Scheduler), trade
       statistics on the overview, fix known issue 1 (`main.py`), desktop
       shortcut with an icon.
 8. Risk engine (proposed paper values, not approved: 0.5% risk per trade, 2% max

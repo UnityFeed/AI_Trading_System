@@ -142,6 +142,27 @@ class TestServer(unittest.TestCase):
         with self.assertRaises(HTTPError):
             self.get("/api/chart?tf=2h")
 
+    def test_strategy_tester_routes(self):
+
+        status, page = self.get("/strategy")
+        self.assertEqual(status, 200)
+        self.assertIn("Strategy tester", page)
+
+        strategies = json.loads(self.get("/api/strategies")[1])
+        self.assertIn(strategies["active"], [s["id"] for s in strategies["strategies"]])
+
+        report = json.loads(self.get(f"/api/backtest?strategy={strategies['active']}&fee=0.4")[1])
+        self.assertEqual(report["costs"]["fee_pct"], 0.4)
+        self.assertIn("years", report)
+
+        chart = json.loads(self.get(f"/api/chart?tf=1d&trades={strategies['active']}")[1])
+        self.assertIn("markers", chart)
+        self.assertEqual(json.loads(self.get("/api/chart?tf=1d&trades=none")[1])["markers"], [])
+
+        for bad in ("/api/backtest?strategy=nope", "/api/backtest?fee=0.1", "/api/chart?trades=nope"):
+            with self.assertRaises(HTTPError):
+                self.get(bad)
+
     def test_buttons_need_the_app_header(self):
 
         status, _ = self.post("/api/run?update=0")

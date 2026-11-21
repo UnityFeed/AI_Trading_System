@@ -20,6 +20,11 @@ from urllib.parse import parse_qs, urlparse
 
 from src.app.chart_data import build_series, chunk, trade_markers
 from src.app.chart_page import NAV_CSS, NAV_SCRIPT, chart_page, nav_html
+from src.app.strategy_page import strategy_page
+from src.backtesting.engine import CostSettings
+from src.backtesting.market import build_market
+from src.backtesting.report import strategy_report, trade_markers_from_report
+from src.strategies.registry import ACTIVE_STRATEGY_ID, STRATEGIES, get_strategy
 from src.app.routine import daily_routine, load_history
 from src.data_collection.market_data_repository import MarketDataRepository
 from src.paper_trading.store import PaperTradingStore
@@ -27,6 +32,7 @@ from src.reporting.dashboard import gather, render
 
 
 TIMEFRAMES = ("1h", "4h", "1d")
+FEES = (0.80, 0.40)
 MAX_CHUNK = 5000
 
 
@@ -56,6 +62,22 @@ class AppState:
             self.history = history
             self.series = series
             self.dashboard = dashboard
+            self.markets = {}
+            self.reports = {}
+
+    def report(self, strategy_id: str, fee_pct: float) -> dict:
+        """Full-history backtest report, cached until the next data reload."""
+        key = (strategy_id, fee_pct)
+        with self.data_lock:
+            if key in self.reports:
+                return self.reports[key]
+            definition = get_strategy(strategy_id)
+            market = self.markets.get(definition.timeframe)
+            if market is None:
+                market = self.markets[definition.timeframe] = build_market(self.history, definition.timeframe)
+            report = strategy_report(market, definition, CostSettings(fee_pct=fee_pct))
+            self.reports[key] = report
+            return report
 
     # -- jobs ------------------------------------------------------------------
 
@@ -116,6 +138,31 @@ def make_handler(state: AppState):
             if url.path == "/chart":
                 return self._send(200, chart_page(), "text/html; charset=utf-8")
 
+            if url.path == "/strategy":
+                return self._send(200, strategy_page(), "text/html; charset=utf-8")
+
+            if url.path == "/api/strategies":
+                return self._json({
+                    "active": ACTIVE_STRATEGY_ID,
+                    "fees": FEES,
+                    "strategies": [
+                        {"id": s.id, "name": s.name, "timeframe": s.timeframe, "rules": s.spec.name,
+                         "description": s.description, "origin": s.origin}
+                        for s in STRATEGIES
+                    ],
+                })
+
+            if url.path == "/api/backtest":
+                strategy_id = query.get("strategy", [ACTIVE_STRATEGY_ID])[0]
+                try:
+                    fee = float(query.get("fee", [FEES[0]])[0])
+                    get_strategy(strategy_id)
+                except (KeyError, ValueError):
+                    return self._json({"error": "unknown strategy or bad fee"}, 400)
+                if fee not in FEES:
+                    return self._json({"error": "fee must be one of %s" % (FEES,)}, 400)
+                return self._json(state.report(strategy_id, fee))
+
             if url.path == "/api/chart":
                 timeframe = query.get("tf", ["1d"])[0]
                 if timeframe not in TIMEFRAMES:
@@ -127,7 +174,17 @@ def make_handler(state: AppState):
                     return self._json({"error": "bad number"}, 400)
                 with state.data_lock:
                     payload = chunk(state.series[timeframe], before, limit)
-                payload["markers"] = trade_markers(state.store.fills(), timeframe)
+                source = query.get("trades", ["paper"])[0]
+                if source == "paper":
+                    payload["markers"] = trade_markers(state.store.fills(), timeframe)
+                elif source == "none":
+                    payload["markers"] = []
+                else:
+                    try:
+                        report = state.report(source, FEES[0])
+                    except KeyError:
+                        return self._json({"error": "unknown strategy"}, 400)
+                    payload["markers"] = trade_markers_from_report(report, timeframe)
                 return self._json(payload)
 
             if url.path == "/api/status":

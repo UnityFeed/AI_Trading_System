@@ -25,6 +25,8 @@ NAV_CSS = """
   background: var(--series-1); color: #fff; cursor: pointer; }
 .app-nav button:disabled { opacity: .6; cursor: progress; }
 .run-status { color: var(--text-muted); font-size: 13px; }
+select { font: inherit; padding: 5px 8px; border-radius: 8px; border: 1px solid var(--border);
+  background: var(--card); color: var(--text-primary); }
 .run-log { margin: 0; max-height: 220px; overflow: auto; background: var(--card); color: var(--text-secondary);
   border-bottom: 1px solid var(--border); padding: 8px 16px; font-size: 12px; white-space: pre-wrap; }
 """
@@ -63,6 +65,7 @@ def nav_html(active: str) -> str:
     return (
         "<nav class='app-nav'><span class='brand'>BTC Trading</span>"
         + link("/", "Overview", "overview") + link("/chart", "Chart", "chart")
+        + link("/strategy", "Strategy tester", "strategy")
         + "<span class='spacer'></span><span class='run-status' id='run-status'></span>"
         "<button id='run-btn' type='button'>Update data &amp; run paper trader</button></nav>"
         "<pre class='run-log' id='run-log' hidden></pre>"
@@ -104,7 +107,7 @@ CHART_SCRIPT = r"""
 
   var TOGGLES = [
     ['ema20', 'EMA 20', '--ema20', true], ['ema50', 'EMA 50', '--ema50', true], ['ema200', 'EMA 200', '--ema200', true],
-    ['bb', 'Bollinger', '--text-muted', false], ['trades', 'Paper trades', '--text-primary', true],
+    ['bb', 'Bollinger', '--text-muted', false], ['trades', 'Trades (B = buy, S = sell)', '--text-primary', true],
     ['volume', 'Volume', '--text-muted', true], ['rsi', 'RSI 14', '--rsi', true],
     ['macd', 'MACD', '--macd', true], ['atr', 'ATR 14', '--atr', false]
   ];
@@ -112,7 +115,10 @@ CHART_SCRIPT = r"""
   function save(key, value) { try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) {} }
 
   var settings = load('chart-settings', {});
-  var tf = load('chart-tf', '1d');
+  var params = new URLSearchParams(location.search);
+  var tf = params.get('tf') || load('chart-tf', '1d');
+  if (['1h', '4h', '1d'].indexOf(tf) < 0) tf = '1d';
+  var source = params.get('trades') || load('chart-trades', 'paper');
   var enabled = {};
   TOGGLES.forEach(function (t) { enabled[t[0]] = settings[t[0]] === undefined ? t[3] : settings[t[0]]; });
 
@@ -144,9 +150,26 @@ CHART_SCRIPT = r"""
     toggleBox.appendChild(label);
   });
 
+  // Which trades to mark: the paper account or a strategy's full backtest.
+  var tradeSelect = document.getElementById('trade-source');
+  var paperOption = document.createElement('option'); paperOption.value = 'paper'; paperOption.textContent = 'Paper account';
+  tradeSelect.appendChild(paperOption);
+  fetch('/api/strategies').then(function (r) { return r.json(); }).then(function (d) {
+    d.strategies.forEach(function (st) {
+      var o = document.createElement('option'); o.value = st.id; o.textContent = 'Backtest: ' + st.name + ' (' + st.timeframe + ')';
+      tradeSelect.appendChild(o);
+    });
+    tradeSelect.value = source;
+    if (tradeSelect.value !== source) { source = 'paper'; tradeSelect.value = 'paper'; }
+  });
+  tradeSelect.addEventListener('change', function () {
+    source = tradeSelect.value; save('chart-trades', source);
+    cache = {}; show();
+  });
+
   // ---- data -----------------------------------------------------------------
   function fetchChunk(before) {
-    var url = '/api/chart?tf=' + tf + '&limit=3000' + (before ? '&before=' + before : '');
+    var url = '/api/chart?tf=' + tf + '&limit=3000&trades=' + encodeURIComponent(source) + (before ? '&before=' + before : '');
     return fetch(url).then(function (r) { return r.json(); });
   }
   function show() {
@@ -193,7 +216,7 @@ CHART_SCRIPT = r"""
                fontFamily: getComputedStyle(document.body).fontFamily, panes: {separatorColor: css('--border')}},
       grid: {vertLines: {color: css('--grid')}, horzLines: {color: css('--grid')}},
       rightPriceScale: {borderColor: css('--border')},
-      timeScale: {borderColor: css('--border'), timeVisible: tf !== '1d', secondsVisible: false, rightOffset: 5},
+      timeScale: {borderColor: css('--border'), timeVisible: tf !== '1d', secondsVisible: false, rightOffset: 5, minBarSpacing: 0.05},
       crosshair: {mode: LWC.CrosshairMode.Normal},
       localization: {priceFormatter: function (p) { return fmt(p, 2); }}
     });
@@ -274,8 +297,8 @@ CHART_SCRIPT = r"""
       var first = c.candles[0][0];
       LWC.createSeriesMarkers(series.candles, c.markers.filter(function (m) { return m.time >= first; }).map(function (m) {
         return m.side === 'buy'
-          ? {time: m.time, position: 'belowBar', shape: 'arrowUp', color: css('--text-primary'), text: 'BUY ' + fmt(m.price, 0)}
-          : {time: m.time, position: 'aboveBar', shape: 'arrowDown', color: css('--text-primary'), text: 'SELL ' + fmt(m.price, 0)};
+          ? {time: m.time, position: 'belowBar', shape: 'arrowUp', color: css('--text-primary'), text: 'B'}
+          : {time: m.time, position: 'aboveBar', shape: 'arrowDown', color: css('--text-primary'), text: 'S'};
       }));
     }
   }
@@ -330,7 +353,8 @@ def chart_page() -> str:
         f"<style>{CSS}{NAV_CSS}{CHART_CSS}</style></head><body>"
         + nav_html("chart")
         + "<div class='toolbar'><div class='seg' id='tf' role='group' aria-label='Timeframe'></div>"
-        "<div class='toggles' id='toggles'></div></div>"
+        "<div class='toggles' id='toggles'></div>"
+        "<label class='secondary' style='font-size:14px'>Trades: <select id='trade-source'></select></label></div>"
         "<div id='chart-wrap'><div id='readout'></div><div id='chart'></div></div>"
         "<div class='note'>Scroll or drag to move back in time (older candles load automatically), "
         "pinch or mouse wheel to zoom. Grey candles contain hours filled in from another exchange "
