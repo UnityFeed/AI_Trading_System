@@ -6,11 +6,19 @@ Last updated: 21 Nov 2026. Owner: UnityFeed (beginner in Python, learning while 
 changes, update the relevant section here in the same commit.
 
 ## What this is
-Modular, paper-trading-first Python platform, currently BTC/USD on 1h candles.
+Modular, paper-trading-first Python platform for BTC/USD (1h, 4h, 1d candles).
 Live trading is NOT enabled and must not be added without an explicit request.
-Long-term goal: collect multi-exchange data, analyse market structure, produce
-calibrated scenario probabilities, run deterministic risk controls, paper trade,
-and only after validation consider automated execution.
+
+**Owner's trading goal (21 Nov 2026):** spot only, no margin, no leverage, no
+short selling: buy low, sell high. Find, from real historical data, the common
+ground in the indicators (trend, momentum, oversold/overbought, volatility,
+volume) that marks good moments to BUY and to SELL, using every indicator to
+time those moments. A pattern only counts when it holds on years it was not
+chosen on, after Kraken's real fees and slippage, compared with buy-and-hold.
+
+Long-term: multi-exchange data, market-structure analysis, calibrated scenario
+probabilities, deterministic risk controls, paper trading, and only after
+validation consider automated execution.
 
 ## Environment
 - Windows, PowerShell, project at `C:\Users\PC\AI_Trading_System`, venv `.venv`
@@ -39,6 +47,9 @@ Run scripts as modules (`-m scripts.name`, no `.py`) because imports start with 
   (needs internet): `python -m scripts.check_kraken_gaps`
 - Continuous history: filled hours, remaining gaps, jumps between exchanges:
   `python -m scripts.report_continuous_history`
+- Strategy search / backtest (all indicator combinations, 1h/4h/1d, ~30 s):
+  `python -m scripts.run_backtests` (options: `--fee 0.40`, `--slippage 0.05`,
+  `--timeframes 4h 1d`). Full results as CSV in `data/backtests/` (gitignored).
 
 ## Architecture (keep it; do not redesign without a clear reason)
 - `src/data_collection/`: `MarketData` dataclass, `data_validator`, `MarketDataProvider`
@@ -54,12 +65,17 @@ Run scripts as modules (`-m scripts.name`, no `.py`) because imports start with 
   `get_continuous_history` gap-filled series, `get_primary_history` segments),
   `timeframes.py` (`aggregate_hourly_candles`: 1h -> 4h/1d; `split_into_runs`:
   consecutive-candle runs for any timeframe), `daily_comparison.py`
-- `src/strategies/sma_crossover.py`: long-only crossover signals
+- `src/strategies/sma_crossover.py`: long-only crossover signals (older, hourly)
+- `src/backtesting/`: `market.py` (`build_market`: candles + indicators +
+  which opens are tradeable), `conditions.py` (entry building blocks in three
+  roles: trend filter, trigger, volume filter; exit rules; ATR stops),
+  `engine.py` (`run_backtest`, `buy_and_hold`, `CostSettings`), `search.py`
+  (all 540 combinations, selection/test windows, ranking)
 - `src/risk_management/`, `src/execution/`: empty packages (not started)
 - `scripts/`: import, update, integrity, comparison and anomaly tools
 - `tests/`: data layer, collector, SMA, returns, SMA crossover, data quality,
   primary history, continuous history, timeframes, daily comparison,
-  technical indicators, Kraken gap finder
+  technical indicators, Kraken gap finder, backtesting engine/search
   (also guards the real `confirmed_anomalies.csv` against format errors).
   `tests/helpers.py` has `hourly_candles()` for building test candles.
 
@@ -116,6 +132,15 @@ open, high, low, close, volume. DB primary key:
   afterwards. Evaluate with Brier score, log loss and calibration, not accuracy alone.
 - Signals use completed candles only. Backtests must fill no earlier than the
   next candle, with fees and slippage. Avoid look-ahead bias.
+- Backtest costs: default fee 0.80% per side = Kraken Pro taker fee, lowest
+  tier ($0+), from kraken.com/pro/fees, checked 21 Nov 2026 (maker 0.40%;
+  $2.5K+: 0.30/0.60; $10K+: 0.22/0.38; Buy Crypto app ~1% + spread). Slippage
+  0.05% per side is an assumption. Long-only, all-in/all-out, no leverage.
+- Strategy selection guards against overfitting: windows 2013-2016 (bitstamp
+  era) and 2017-2021 (kraken era) are used to choose; a combination is ranked
+  by its WEAKEST selection window (calmar = yearly return / max drop) and needs
+  a minimum number of trades. 2022-now is never used to choose, only to test.
+  Never tune on, or pick by, the unseen window.
 
 ## Status
 Done: data layer for 3 exchanges, update/import scripts, integrity, comparison and
@@ -151,6 +176,22 @@ trades and Coinbase/Bitstamp candles:
   then the price falls to the other exchanges' level within the hour. Fills are
   fine; the jump is in Kraken's own reopening candle (stale open, inflated
   high/low range).
+
+Step 4 (backtester) built 21 Nov 2026, 171 tests pass. First run on a TEST
+database in the cloud session (real Bitstamp hourly + real Coinbase hourly
+standing in for Kraken from 2017; NOT the owner's DB), fee 0.80%:
+- 1h: 0/540 combinations beat buy-and-hold in 2022-now; ~100+ trades per
+  window and ~1.7% cost per round trip destroy any edge. With zero costs the
+  top 10 would beat it 8/10, so the hourly signals have some information but
+  not enough to pay Kraken's fees.
+- 4h: top 10 chosen on 2013-2021 all fail on 2022-now (overfitting).
+- 1d: top 10 chosen on 2013-2021 beat buy-and-hold in 2022-now 7/10 (10/10 at
+  0.40% fee), max drop ~37-45% vs 67%. Common ground: TREND FOLLOWING, not
+  dip buying: buy when the trend is up (EMA50 > EMA200 or close > EMA200) and
+  momentum turns up (MACD crosses up, or EMA20 crosses above EMA50); sell when
+  EMA20 crosses below EMA50. Oversold triggers (RSI < 30/40, close below lower
+  Bollinger band) did not hold up. Caveat: only 3-15 trades per window, so
+  evidence is thin. Must be confirmed on the owner's real DB.
 
 Step 0 results (owner ran on PC, 21 Nov 2026, data current to 2026-11-21 11:00 UTC;
 SQLite integrity ok, 0 duplicates, 0 invalid OHLCV, 0 non-aligned timestamps):
@@ -199,11 +240,27 @@ Known issues:
    candles, gap-aware). Compare daily with exchange daily candles.
 3. [DONE 21 Nov 2026] Indicators: EMA 20/50/200, RSI, MACD, Bollinger, ATR, volume features.
    Timeframe-generic, tested, reset across gaps, no look-ahead.
-4. Minimal backtester (next-candle fills, fees, slippage, vs buy-and-hold).
-5. Risk engine (proposed paper values, not approved: 0.5% risk per trade, 2% max
+4. [DONE 21 Nov 2026] Backtester + strategy search: long-only spot, next-open
+   fills, Kraken fees and slippage, no fills on filled/reopening hours, every
+   combination of trend filter x trigger x volume filter x exit x ATR stop on
+   1h/4h/1d, chosen on 2013-2021, tested on 2022-now, vs buy-and-hold.
+   NEXT: owner runs `run_backtests` on the real DB.
+5. Find the common ground (owner's main goal): which indicator conditions
+   reliably mark good BUY and SELL moments on real data.
+   a. Confirm step 4 findings on the real DB, at 0.80% and 0.40% fees.
+   b. Widen the building blocks so every indicator is tested in every role
+      (e.g. RSI and Bollinger as exits AND as filters, ATR volatility filter,
+      MACD histogram turns, EMA distance, volume on exits), plus parameter
+      variants (RSI levels, EMA pairs).
+   c. Stronger checks against luck: rolling walk-forward (choose on N years,
+      test on the next year, repeat), per-year results, minimum trades, and
+      compare against random entries with the same exposure.
+   d. Limit-order (maker fee) execution model, since fees decide the 1h/4h result.
+   e. Write the surviving rules down as a named strategy with tests.
+6. Risk engine (proposed paper values, not approved: 0.5% risk per trade, 2% max
    daily loss, 5 positions, 2.5% aggregate open risk, no leverage, stop required,
-   emergency shutdown), then paper-trading loop.
-6. Regime detection, historical analogues, scenario engine, probability
+   emergency shutdown), then paper-trading loop with the chosen strategy.
+7. Regime detection, historical analogues, scenario engine, probability
    calibration, prediction log, ML. Only after the data foundation is validated.
 
 ## How to work with the owner
