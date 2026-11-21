@@ -2,9 +2,12 @@
 The local app: a small web server on your own computer (127.0.0.1 only,
 not reachable from other machines) that serves
 
-  /              the overview dashboard
-  /chart         the interactive chart (all timeframes and indicators)
+  /              the overview: the selected strategy's latest trade and signal
+  /chart         the interactive chart (all timeframes, indicators, the
+                 selected strategy's trades and current state)
+  /strategy      the strategy tester (full-history backtest)
   /api/chart     chart data in chunks (used by the chart page)
+  /api/strategies, /api/backtest, /api/strategy-state   strategy data
   /api/status    progress of a running job
   /api/run       POST: start the daily routine (update data + paper trader)
 
@@ -19,17 +22,19 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
 from src.app.chart_data import build_series, chunk, trade_markers
-from src.app.chart_page import NAV_CSS, NAV_SCRIPT, chart_page, nav_html
+from src.app.chart_page import chart_page
+from src.app.overview_page import overview_page
 from src.app.strategy_page import strategy_page
 from src.backtesting.engine import CostSettings, MarginSettings
 from src.backtesting.market import build_market
-from src.backtesting.report import strategy_report, trade_markers_from_report
+from src.backtesting.report import strategy_report, strategy_state, trade_markers_from_report
 from src.strategies.registry import ACTIVE_STRATEGY_ID, STRATEGIES, get_strategy
 from src.analysis.technical_indicators import indicator_tables
 from src.app.routine import daily_routine, load_history
 from src.data_collection.market_data_repository import MarketDataRepository
 from src.paper_trading.store import PaperTradingStore
-from src.reporting.dashboard import gather, render
+from src.paper_trading.trader import KILL_SWITCH
+from src.reporting.dashboard import exchange_status
 
 
 TIMEFRAMES = ("1h", "4h", "1d")
@@ -57,17 +62,37 @@ class AppState:
         history = load_history(self.repository)
         tables = indicator_tables(history.candles, TIMEFRAMES)
         series = {tf: build_series(history, tf, tables[tf]) for tf in TIMEFRAMES}
-        dashboard = render(
-            gather(self.repository, history, self.store, tables=tables),
-            nav_html=f"<style>{NAV_CSS}</style>{nav_html('overview')}<script>{NAV_SCRIPT}</script>",
-        )
+        exchanges = exchange_status(self.repository, datetime.now(timezone.utc))
         with self.data_lock:
             self.history = history
             self.series = series
-            self.dashboard = dashboard
+            self.exchanges = exchanges
             self.tables = tables
             self.markets = {}
             self.reports = {}
+            self.states = {}
+
+    def _market(self, timeframe: str):
+        """Backtest market for one timeframe (call with data_lock held)."""
+        market = self.markets.get(timeframe)
+        if market is None:
+            market = self.markets[timeframe] = build_market(
+                self.history, timeframe, table=self.tables.get(timeframe)
+            )
+        return market
+
+    def state(self, strategy_id: str) -> dict:
+        """Where a strategy stands now, cached until the next data reload."""
+        with self.data_lock:
+            if strategy_id not in self.states:
+                definition = get_strategy(strategy_id)
+                self.states[strategy_id] = strategy_state(self._market(definition.timeframe), definition)
+            return self.states[strategy_id]
+
+    def overview(self) -> str:
+        with self.data_lock:
+            history, exchanges = self.history, self.exchanges
+        return overview_page(history, exchanges, self.store.get_account(), KILL_SWITCH.exists())
 
     def report(self, strategy_id: str, fee_pct: float, leverage: float = 1.0) -> dict:
         """Full-history backtest report, cached until the next data reload."""
@@ -76,11 +101,7 @@ class AppState:
             if key in self.reports:
                 return self.reports[key]
             definition = get_strategy(strategy_id)
-            market = self.markets.get(definition.timeframe)
-            if market is None:
-                market = self.markets[definition.timeframe] = build_market(
-                    self.history, definition.timeframe, table=self.tables.get(definition.timeframe)
-                )
+            market = self._market(definition.timeframe)
             report = strategy_report(
                 market, definition, CostSettings(fee_pct=fee_pct), MarginSettings(leverage=leverage)
             )
@@ -139,9 +160,13 @@ def make_handler(state: AppState):
             query = parse_qs(url.query)
 
             if url.path == "/":
-                with state.data_lock:
-                    page = state.dashboard
-                return self._send(200, page, "text/html; charset=utf-8")
+                return self._send(200, state.overview(), "text/html; charset=utf-8")
+
+            if url.path == "/api/strategy-state":
+                try:
+                    return self._json(state.state(query.get("strategy", [ACTIVE_STRATEGY_ID])[0]))
+                except KeyError:
+                    return self._json({"error": "unknown strategy"}, 400)
 
             if url.path == "/chart":
                 return self._send(200, chart_page(), "text/html; charset=utf-8")

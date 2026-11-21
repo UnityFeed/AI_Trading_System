@@ -37,11 +37,15 @@ validation consider automated execution.
 Run scripts as modules (`-m scripts.name`, no `.py`) because imports start with `src.`.
 - THE APP (no terminal needed): double-click `start_app.bat` in the project
   folder. It runs `python -m scripts.run_app`: a local web server on
-  http://127.0.0.1:8765 (this PC only) and opens the browser. Pages: Overview
-  (dashboard), Chart (interactive; "Trades" selector shows the paper account
-  or any strategy's full backtest) and Strategy tester (full-history backtest
-  of any strategy: vs buy-and-hold, per year, every trade, 0.80%/0.40% fees,
-  margin Off/2x/3x/5x/10x). The button "Update data & run paper
+  http://127.0.0.1:8765 (this PC only) and opens the browser. One strategy
+  choice is shared by all pages (remembered in the browser). Pages: Overview
+  (the selected strategy's latest/open trade and how it is doing, its signal
+  at the latest close, recent trades, paper account, data health), Chart (one
+  chart for everything: full history 1h/4h/1d, indicators, the selected
+  strategy's backtest trades, open-trade buy/stop lines, a BUY/SELL signal
+  marker and a status strip with the rules) and Strategy tester (full-history
+  backtest: vs buy-and-hold, per year, every trade, 0.80%/0.40% fees, margin
+  Off/2x/3x/5x/10x). The button "Update data & run paper
   trader" does the daily routine. Keep the black window open; close it to stop.
 - Activate venv: `.venv\Scripts\Activate.ps1` (then `python` = venv python)
 - DAILY ROUTINE (update data, paper trade, rebuild dashboard):
@@ -96,12 +100,16 @@ Run scripts as modules (`-m scripts.name`, no `.py`) because imports start with 
   ranking), `walk_forward.py` (one continuous run per combination summarised per
   year; yearly walk-forward picks chosen only on earlier years), `report.py`
   (`strategy_report`: the standard full-history test for one strategy,
-  JSON-ready: summary, per year, trades, daily equity; trade markers)
+  JSON-ready: summary, per year, trades, daily equity; trade markers;
+  `strategy_state`: rules at the latest close, open trade with its result if
+  sold now and stop, BUY/SELL signal to be carried out at the next open,
+  recent trades; same continuous run as the backtest)
 - `src/paper_trading/`: `store.py` (`PaperTradingStore`, own SQLite file
   `database/paper_trading.db`: account, append-only decisions and fills),
   `trader.py` (`PaperTrader`, `ACTIVE_STRATEGY` = candidate 1 on 1d, $10,000
   start, safety checks: stale data, kill switch)
-- `src/reporting/dashboard.py`: `gather` + `render` -> the Overview page (key
+- `src/reporting/dashboard.py`: `gather` + `render` -> the OFFLINE overview file
+  written by `daily_run`/`build_dashboard` (the app has its own Overview); (key
   numbers + BTC price, paper account chart, strategy today, latest decisions,
   market readings 1d/4h/1h, data status, research summary, folded terminal
   commands); `page()` is the shared HTML shell (favicon, shared `CSS`) used by
@@ -115,6 +123,10 @@ Run scripts as modules (`-m scripts.name`, no `.py`) because imports start with 
   5.2.1 from jsDelivr, Apache 2.0: 1h/4h/1d, scroll back loads older chunks,
   toggles for EMA 20/50/200, Bollinger, trades, volume, RSI, MACD, ATR),
   `strategy_page.py` (Strategy tester page, log-scale equity chart),
+  `overview_page.py` (app Overview, filled from /api/strategy-state),
+  `chart_page.SHARED_SELECTION_SCRIPT` (`SelectedStrategy`: the shared choice,
+  key `selected-strategy`; `?strategy=` links win, else last choice, else the
+  active strategy),
   `server.py` (`AppState` caches history/series/dashboard/markets/reports; stdlib
   ThreadingHTTPServer on 127.0.0.1; POST needs header `X-App-Action: 1`)
 - `src/data_collection/exchange_updater.py`: `update_all_exchanges(repository,
@@ -449,6 +461,12 @@ Known issues:
       merged (`conditions.strategy_signals`), `main.py` status check fixed,
       one-time scripts archived, README rewritten, modern card layout on all
       pages (shared shell, favicon, pill nav, focus outlines, phone checks).
+   e2. [DONE 21 Nov 2026] One chart + latest-trade overview (owner request): the
+      Chart shows the selected strategy's backtest trades plus its current
+      state (open trade lines, signal marker, rule strip); the Overview shows
+      how the latest trade is doing; one shared strategy choice. Fixed: the
+      Strategy tester forgot its choices between tabs; chart trade markers
+      were stacked again each time older candles loaded.
    f. Schedule the daily routine automatically (Windows Task Scheduler), trade
       statistics on the overview, desktop shortcut with an icon.
 8. Risk engine (proposed paper values, not approved: 0.5% risk per trade, 2% max

@@ -163,6 +163,21 @@ class TestServer(unittest.TestCase):
             with self.assertRaises(HTTPError):
                 self.get(bad)
 
+    def test_overview_and_strategy_state(self):
+
+        status, page = self.get("/")
+        self.assertIn("latest-trade", page)
+        self.assertIn("SelectedStrategy", page)
+
+        active = json.loads(self.get("/api/strategies")[1])["active"]
+        state = json.loads(self.get(f"/api/strategy-state?strategy={active}")[1])
+        self.assertEqual(state["strategy"]["id"], active)
+        self.assertIn("rules", state)
+        self.assertIn("position", state)
+
+        with self.assertRaises(HTTPError):
+            self.get("/api/strategy-state?strategy=nope")
+
     def test_buttons_need_the_app_header(self):
 
         status, _ = self.post("/api/run?update=0")

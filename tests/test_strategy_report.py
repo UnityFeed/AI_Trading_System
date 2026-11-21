@@ -6,7 +6,7 @@ from src.analysis.primary_history import PRIMARY_LABEL, ContinuousHistory
 from src.backtesting.conditions import EXITS, TREND_FILTERS, TRIGGERS, VOLUME_FILTERS
 from src.backtesting.engine import CostSettings, run_backtest
 from src.backtesting.market import build_market
-from src.backtesting.report import signals, strategy_report, trade_markers_from_report
+from src.backtesting.report import signals, strategy_report, strategy_state, trade_markers_from_report
 from src.backtesting.search import StrategySpec
 from src.strategies.registry import (
     ACTIVE_STRATEGY_ID, STRATEGIES, StrategyDefinition, active_strategy, get_strategy,
@@ -85,6 +85,61 @@ class TestStrategyReport(unittest.TestCase):
         markers = trade_markers_from_report(report, "1d")
         self.assertEqual([m["side"] for m in markers], ["buy", "sell", "buy"])
         self.assertEqual(markers[0]["time"], int(datetime(2026, 1, 1, tzinfo=timezone.utc).timestamp()))
+
+
+def prefix(market, k):
+    """The market as it looked when only its first k candles existed."""
+    return replace(market, candles=market.candles[:k], rows=market.rows[:k],
+                   tradeable=market.tradeable[:k], consecutive=market.consecutive[:k])
+
+
+class TestStrategyState(unittest.TestCase):
+
+    def setUp(self):
+        self.market = make_market()
+
+    def test_signals_are_carried_out_at_the_next_open(self):
+        """A BUY/SELL signal at a close must show up as a trade one candle later."""
+        seen = {"BUY": 0, "SELL": 0}
+        for k in range(40, len(self.market.candles) - 1):
+            now = strategy_state(prefix(self.market, k), DEFINITION, NO_COSTS)
+            if not now["signal"]:
+                continue
+            action = now["signal"]["action"]
+            seen[action] += 1
+            later = strategy_state(prefix(self.market, k + 1), DEFINITION, NO_COSTS)
+            next_open = self.market.candles[k].timestamp.isoformat()
+            if action == "BUY":
+                self.assertEqual(later["position"]["entry_time"], next_open)
+            else:
+                self.assertIsNone(later["position"])
+                self.assertEqual(later["last_closed_trade"]["exit_time"], next_open)
+        self.assertGreater(seen["BUY"], 0)
+        self.assertGreater(seen["SELL"], 0)
+
+    def test_open_position_matches_the_backtest(self):
+        # Find a moment where the strategy holds BTC.
+        for k in range(40, len(self.market.candles)):
+            state = strategy_state(prefix(self.market, k), DEFINITION, NO_COSTS)
+            if state["position"]:
+                break
+        else:
+            self.fail("the test market never holds a position")
+
+        report = strategy_report(prefix(self.market, k), DEFINITION, NO_COSTS)
+        open_trade = report["trades"][-1]
+        self.assertTrue(open_trade["open"])
+        self.assertEqual(state["position"]["entry_time"], open_trade["entry_time"])
+        self.assertAlmostEqual(state["position"]["result_if_sold_pct"], open_trade["return_pct"])
+
+    def test_rules_and_recent_trades(self):
+        state = strategy_state(self.market, DEFINITION, NO_COSTS)
+
+        self.assertEqual([r["role"] for r in state["rules"]], ["Trend filter", "Buy trigger", "Sell rule"])
+        self.assertLessEqual(len(state["recent_trades"]), 5)
+        if state["recent_trades"]:
+            newest = state["recent_trades"][0]
+            self.assertEqual(newest, state["last_closed_trade"])
 
 
 if __name__ == "__main__":

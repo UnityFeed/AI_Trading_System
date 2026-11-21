@@ -4,7 +4,9 @@ full-history backtest next to buy-and-hold: summary, account value over
 time (log scale), results per year and every trade.
 """
 
-from src.app.chart_page import CHART_CSS, CHART_LIBRARY, NAV_CSS, NAV_SCRIPT, nav_html
+from src.app.chart_page import (
+    CHART_CSS, CHART_LIBRARY, NAV_CSS, NAV_SCRIPT, SHARED_SELECTION_SCRIPT, nav_html,
+)
 from src.reporting.dashboard import page
 
 
@@ -60,7 +62,7 @@ PAGE_SCRIPT = r"""
       o.value = lev; marginSelect.appendChild(o);
     });
     // A link (?strategy=...) wins; otherwise the last choice; otherwise the active strategy.
-    choose(strategySelect, params.get('strategy') || remembered('strategy') || d.active, d.active);
+    choose(strategySelect, params.get('strategy') || SelectedStrategy.get() || d.active, d.active);
     choose(feeSelect, remembered('fee') || String(d.fees[0]), String(d.fees[0]));
     choose(marginSelect, remembered('margin') || '1', '1');
     load();
@@ -71,7 +73,7 @@ PAGE_SCRIPT = r"""
 
   function load() {
     var id = strategySelect.value;
-    remember('strategy', id); remember('fee', feeSelect.value); remember('margin', marginSelect.value);
+    SelectedStrategy.set(id); remember('fee', feeSelect.value); remember('margin', marginSelect.value);
     history.replaceState(null, '', '/strategy?strategy=' + encodeURIComponent(id));
     document.getElementById('status').textContent = 'Running the backtest over the full history...';
     fetch('/api/backtest?strategy=' + encodeURIComponent(id) + '&fee=' + feeSelect.value + '&leverage=' + marginSelect.value)
@@ -81,7 +83,7 @@ PAGE_SCRIPT = r"""
   function render(rep) {
     document.getElementById('status').textContent = '';
     var s = rep.strategy;
-    document.getElementById('show-on-chart').href = '/chart?tf=' + s.timeframe + '&trades=' + encodeURIComponent(s.id);
+    document.getElementById('show-on-chart').href = '/chart?tf=' + s.timeframe + '&strategy=' + encodeURIComponent(s.id);
     document.getElementById('description').textContent = s.description;
     document.getElementById('rules').textContent = 'Rules: ' + s.rules + ' - timeframe ' + s.timeframe +
       ' - costs ' + rep.costs.fee_pct + '% fee + ' + rep.costs.slippage_pct + '% slippage per buy and per sell';
@@ -229,5 +231,5 @@ def strategy_page() -> str:
         "<section class='panel'><div class='panel-head'><h2>Every trade</h2><span class='muted small'>newest first</span></div>"
         "<div class='scroll-y'><table class='compact' id='trades'></table></div></section></main>",
         head=f"<style>{NAV_CSS}{CHART_CSS}{PAGE_CSS}</style>",
-        scripts=f"<script src='{CHART_LIBRARY}'></script><script>{NAV_SCRIPT}{PAGE_SCRIPT}</script>",
+        scripts=f"<script src='{CHART_LIBRARY}'></script><script>{NAV_SCRIPT}{SHARED_SELECTION_SCRIPT}{PAGE_SCRIPT}</script>",
     )

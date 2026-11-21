@@ -61,6 +61,33 @@ NAV_SCRIPT = """
 """
 
 
+# The strategy chosen on any page is the strategy of every page.
+SHARED_SELECTION_SCRIPT = r"""
+var SelectedStrategy = (function () {
+  var KEY = 'selected-strategy';
+  function get() { try { return localStorage.getItem(KEY); } catch (e) { return null; } }
+  function set(value) { try { localStorage.setItem(KEY, value); } catch (e) {} }
+  // Fill a <select> with every strategy and pick: a ?strategy= link, else the
+  // last choice, else the active (paper trading) strategy.
+  function fill(select, done) {
+    fetch('/api/strategies').then(function (r) { return r.json(); }).then(function (d) {
+      d.strategies.forEach(function (s) {
+        var o = document.createElement('option'); o.value = s.id;
+        o.textContent = s.name + ' (' + s.timeframe + ')' + (s.id === d.active ? ' - paper trading' : '');
+        select.appendChild(o);
+      });
+      var wanted = new URLSearchParams(location.search).get('strategy') || get() || d.active;
+      select.value = wanted;
+      if (select.value !== wanted) select.value = d.active;
+      set(select.value);
+      done(d);
+    });
+  }
+  return {get: get, set: set, fill: fill};
+})();
+"""
+
+
 def nav_html(active: str) -> str:
     def link(href, name, key):
         cls = " class='active'" if key == active else ""
@@ -93,6 +120,9 @@ body { height: 100vh; display: flex; flex-direction: column; }
 .toggles { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 14px; color: var(--text-secondary); }
 .toggles label { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
 .key { width: 14px; height: 3px; border-radius: 2px; display: inline-block; }
+.state-strip { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; padding: 8px 16px; font-size: 14px;
+  border-bottom: 1px solid var(--border); background: var(--card); min-height: 40px; }
+.state-strip .badge { font-weight: 500; font-size: 13px; }
 #chart-wrap { position: relative; flex: 1; min-height: 420px; }
 #chart { position: absolute; inset: 0; }
 #readout { position: absolute; top: 8px; left: 12px; z-index: 5; pointer-events: none; font-size: 12px;
@@ -122,14 +152,15 @@ CHART_SCRIPT = r"""
   var params = new URLSearchParams(location.search);
   var tf = params.get('tf') || load('chart-tf', '1d');
   if (['1h', '4h', '1d'].indexOf(tf) < 0) tf = '1d';
-  var source = params.get('trades') || load('chart-trades', 'paper');
-  // Settings that arrived through a link are remembered like manual choices.
-  save('chart-tf', tf); save('chart-trades', source);
+  var source = null;  // id of the selected strategy (shared with the other pages)
+  var state = null;   // where that strategy stands now (/api/strategy-state)
+  // A timeframe that arrived through a link is remembered like a manual choice.
+  save('chart-tf', tf);
   var enabled = {};
   TOGGLES.forEach(function (t) { enabled[t[0]] = settings[t[0]] === undefined ? t[3] : settings[t[0]]; });
 
   var cache = {};   // timeframe -> {candles, indicators, markers, hasMore}
-  var chart = null, builtTf = null, series = {}, loading = false;
+  var chart = null, builtTf = null, series = {}, loading = false, markersLayer = null;
 
   function css(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
   function fmt(v, digits) { return v === null || v === undefined ? '-' : Number(v).toLocaleString(undefined, {minimumFractionDigits: digits, maximumFractionDigits: digits}); }
@@ -156,22 +187,47 @@ CHART_SCRIPT = r"""
     toggleBox.appendChild(label);
   });
 
-  // Which trades to mark: the paper account or a strategy's full backtest.
-  var tradeSelect = document.getElementById('trade-source');
-  var paperOption = document.createElement('option'); paperOption.value = 'paper'; paperOption.textContent = 'Paper account';
-  tradeSelect.appendChild(paperOption);
-  fetch('/api/strategies').then(function (r) { return r.json(); }).then(function (d) {
-    d.strategies.forEach(function (st) {
-      var o = document.createElement('option'); o.value = st.id; o.textContent = 'Backtest: ' + st.name + ' (' + st.timeframe + ')';
-      tradeSelect.appendChild(o);
+  // The selected strategy: its backtest trades are marked on the chart and
+  // the strip above the chart shows where it stands now.
+  var strategySelect = document.getElementById('strategy');
+  SelectedStrategy.fill(strategySelect, function () { source = strategySelect.value; show(); loadState(); });
+  strategySelect.addEventListener('change', function () {
+    source = strategySelect.value; SelectedStrategy.set(source);
+    cache = {}; state = null; show(); loadState();
+  });
+
+  function loadState() {
+    var wanted = source;
+    fetch('/api/strategy-state?strategy=' + encodeURIComponent(wanted)).then(function (r) { return r.json(); }).then(function (s) {
+      if (wanted !== source) return;
+      state = s; renderState();
+      if (cache[tf]) build();
     });
-    tradeSelect.value = source;
-    if (tradeSelect.value !== source) { source = 'paper'; tradeSelect.value = 'paper'; }
-  });
-  tradeSelect.addEventListener('change', function () {
-    source = tradeSelect.value; save('chart-trades', source);
-    cache = {}; show();
-  });
+  }
+
+  function renderState() {
+    var strip = document.getElementById('state'); strip.textContent = '';
+    if (!state) return;
+    function part(text, cls) { var e = document.createElement('span'); e.textContent = text; if (cls) e.className = cls; strip.appendChild(e); return e; }
+    var p = state.position;
+    if (p) {
+      part('OPEN', 'pill strong');
+      part('Bought ' + p.entry_time.slice(0, 10) + ' at $' + fmt(p.entry_price, 0) + ': ' + (p.result_if_sold_pct > 0 ? '+' : '') +
+           p.result_if_sold_pct.toFixed(1) + '% if sold now' + (p.stop_price ? ' · stop $' + fmt(p.stop_price, 0) : ''));
+    } else {
+      part('NO TRADE', 'pill');
+      var last = state.last_closed_trade;
+      part(last ? 'Last trade ' + (last.return_pct > 0 ? '+' : '') + last.return_pct.toFixed(1) + '% (sold ' + last.exit_time.slice(0, 10) + ')' : 'No trades yet');
+    }
+    state.rules.forEach(function (r) {
+      var b = document.createElement('span'); b.className = 'badge ' + (r.met ? 'good' : 'neutral');
+      var icon = document.createElement('span'); icon.className = 'badge-icon'; icon.setAttribute('aria-hidden', 'true');
+      icon.textContent = r.met ? '\u2713' : '\u2013';
+      b.appendChild(icon); b.appendChild(document.createTextNode(r.role)); b.title = r.rule; strip.appendChild(b);
+    });
+    if (state.signal) part(state.signal.action + ' SIGNAL at the next open', 'pill warn');
+    part('as of the ' + state.strategy.timeframe + ' close of ' + state.candle_time.slice(0, 16).replace('T', ' ') + ' UTC', 'muted');
+  }
 
   // ---- data -----------------------------------------------------------------
   function fetchChunk(before) {
@@ -228,6 +284,7 @@ CHART_SCRIPT = r"""
     });
     builtTf = tf;
     series = {};
+    markersLayer = null;
     series.candles = chart.addSeries(LWC.CandlestickSeries, {
       upColor: css('--up'), downColor: css('--down'), wickUpColor: css('--up'), wickDownColor: css('--down'),
       borderVisible: false, priceLineVisible: true
@@ -261,6 +318,14 @@ CHART_SCRIPT = r"""
     if (enabled.atr) { series.atr_14 = line('--atr', pane, {lastValueVisible: true}); small.push(pane++); }
 
     fill();
+    // An open trade: dashed lines at the buy price and the stop.
+    if (enabled.trades && state && state.position) {
+      var pos = state.position;
+      series.candles.createPriceLine({price: pos.entry_price, color: css('--series-1'), lineWidth: 1,
+        lineStyle: LWC.LineStyle.Dashed, axisLabelVisible: true, title: 'bought'});
+      if (pos.stop_price) series.candles.createPriceLine({price: pos.stop_price, color: css('--down'), lineWidth: 1,
+        lineStyle: LWC.LineStyle.Dashed, axisLabelVisible: true, title: 'stop'});
+    }
     // Price pane gets most of the room; each indicator pane a fixed share.
     var panes = chart.panes();
     if (panes[0]) panes[0].setStretchFactor(small.length ? 3.2 : 1);
@@ -299,13 +364,22 @@ CHART_SCRIPT = r"""
         return {time: k[0], value: k[5], color: (k[4] >= k[1] ? upVol : downVol) + '80'};
       }));
     }
-    if (enabled.trades && c.markers.length) {
-      var first = c.candles[0][0];
-      LWC.createSeriesMarkers(series.candles, c.markers.filter(function (m) { return m.time >= first; }).map(function (m) {
+    if (enabled.trades) {
+      var first = c.candles[0][0], ink = css('--text-primary');
+      var marks = c.markers.filter(function (m) { return m.time >= first; }).map(function (m) {
         return m.side === 'buy'
-          ? {time: m.time, position: 'belowBar', shape: 'arrowUp', color: css('--text-primary'), text: 'B'}
-          : {time: m.time, position: 'aboveBar', shape: 'arrowDown', color: css('--text-primary'), text: 'S'};
-      }));
+          ? {time: m.time, position: 'belowBar', shape: 'arrowUp', color: ink, text: 'B'}
+          : {time: m.time, position: 'aboveBar', shape: 'arrowDown', color: ink, text: 'S'};
+      });
+      if (state && state.signal) {
+        var lastTime = c.candles[c.candles.length - 1][0];
+        marks.push(state.signal.action === 'BUY'
+          ? {time: lastTime, position: 'belowBar', shape: 'circle', color: css('--warning'), text: 'BUY signal'}
+          : {time: lastTime, position: 'aboveBar', shape: 'circle', color: css('--warning'), text: 'SELL signal'});
+      }
+      // One markers layer per chart, updated in place (never stacked).
+      if (markersLayer) markersLayer.setMarkers(marks);
+      else markersLayer = LWC.createSeriesMarkers(series.candles, marks);
     }
   }
 
@@ -346,7 +420,6 @@ CHART_SCRIPT = r"""
   }
 
   if (window.matchMedia) window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', build);
-  show();
 })();
 """
 
@@ -357,11 +430,12 @@ def chart_page() -> str:
         nav_html("chart")
         + "<div class='toolbar'><div class='seg' id='tf' role='group' aria-label='Timeframe'></div>"
         "<div class='toggles' id='toggles'></div>"
-        "<label class='secondary' style='font-size:14px'>Trades: <select id='trade-source'></select></label></div>"
+        "<label class='secondary' style='font-size:14px'>Strategy: <select id='strategy'></select></label></div>"
+        "<div class='state-strip' id='state'></div>"
         "<div id='chart-wrap'><div id='readout'></div><div id='chart'></div></div>"
         "<div class='note'>Scroll or drag to move back in time (older candles load automatically), "
         "pinch or mouse wheel to zoom. Grey candles contain hours filled in from another exchange "
         "(Kraken outage). Times in UTC. Chart by TradingView Lightweight Charts.</div>",
         head=f"<style>{NAV_CSS}{CHART_CSS}</style>",
-        scripts=f"<script src='{CHART_LIBRARY}'></script><script>{NAV_SCRIPT}{CHART_SCRIPT}</script>",
+        scripts=f"<script src='{CHART_LIBRARY}'></script><script>{NAV_SCRIPT}{SHARED_SELECTION_SCRIPT}{CHART_SCRIPT}</script>",
     )

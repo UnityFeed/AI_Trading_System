@@ -14,6 +14,7 @@ used to choose the strategy, so this view is optimistic. The walk-forward
 
 from datetime import datetime, timedelta
 
+from src.analysis.timeframes import TIMEFRAME_HOURS
 from src.backtesting.conditions import evaluate_all, strategy_signals
 from src.backtesting.engine import (
     NO_MARGIN, BacktestResult, CostSettings, MarginSettings, buy_and_hold, run_backtest,
@@ -146,3 +147,91 @@ def trade_markers_from_report(report: dict, timeframe: str) -> list[dict]:
                 "price": trade[price],
             })
     return markers
+
+
+def strategy_state(
+    market: Market,
+    definition: StrategyDefinition,
+    costs: CostSettings = CostSettings(),
+    recent: int = 5,
+) -> dict:
+    """
+    Where a strategy stands now, on the same continuous run as its backtest:
+    the rules at the latest completed candle, the open trade (if any) with
+    its result if sold at the latest close, a new BUY/SELL signal at that
+    close (it would be carried out at the next open), and the last trades.
+    """
+
+    spec = definition.spec
+    blocks = evaluate_all(market)
+    entry, exit_signal = strategy_signals(blocks, spec)
+    result = run_backtest(
+        market, range(len(market.candles)), entry, exit_signal, spec.stop_atr, costs
+    )
+
+    last_i = len(market.candles) - 1
+    last = market.candles[last_i]
+    period = timedelta(hours=TIMEFRAME_HOURS[market.timeframe])
+
+    rules = [
+        {"role": "Trend filter", "rule": spec.trend, "met": blocks["trend"][spec.trend][last_i]},
+        {"role": "Buy trigger", "rule": spec.trigger, "met": blocks["trigger"][spec.trigger][last_i]},
+    ]
+    if spec.volume != "none":
+        rules.append({"role": "Volume filter", "rule": spec.volume, "met": blocks["volume"][spec.volume][last_i]})
+    rules.append({"role": "Sell rule", "rule": spec.exit, "met": exit_signal[last_i]})
+
+    trades = result.trades
+    open_trade = trades[-1] if trades and trades[-1].exit_reason == "end" else None
+    closed = [t for t in trades if t.exit_reason != "end"]
+
+    position = None
+    signal = None
+    if open_trade is not None:
+        stop = None
+        if spec.stop_atr:
+            # The stop is set from the ATR of the candle that gave the buy signal.
+            entry_index = next(i for i, c in enumerate(market.candles) if c.timestamp == open_trade.entry_time)
+            j = entry_index - 1
+            while j > 0 and not entry[j]:
+                j -= 1
+            atr = market.rows[j].values.get("atr_14")
+            stop = open_trade.entry_price - spec.stop_atr * atr if atr is not None else None
+        position = {
+            "entry_time": open_trade.entry_time.isoformat(),
+            "entry_price": round(open_trade.entry_price, 2),
+            "price_change_pct": round((last.close / open_trade.entry_price - 1) * 100, 2),
+            "result_if_sold_pct": round(open_trade.return_pct, 2),
+            "days_held": round((last.timestamp + period - open_trade.entry_time) / timedelta(days=1), 1),
+            "stop_price": None if stop is None else round(stop, 2),
+            "stop_distance_pct": None if stop is None else round((last.close / stop - 1) * 100, 2),
+        }
+        if stop is not None and last.close < stop:
+            signal = {"action": "SELL", "reason": "the close is below the stop"}
+        elif exit_signal[last_i]:
+            signal = {"action": "SELL", "reason": f"sell rule: {spec.exit}"}
+    elif entry[last_i]:
+        signal = {"action": "BUY", "reason": "all buy rules are met"}
+
+    def trade_dict(t):
+        return {
+            "entry_time": t.entry_time.isoformat(), "entry_price": round(t.entry_price, 2),
+            "exit_time": t.exit_time.isoformat(), "exit_price": round(t.exit_price, 2),
+            "return_pct": round(t.return_pct, 2), "exit_reason": t.exit_reason,
+            "days_held": round((t.exit_time - t.entry_time) / timedelta(days=1), 1),
+        }
+
+    return {
+        "strategy": {"id": definition.id, "name": definition.name, "timeframe": definition.timeframe,
+                     "description": definition.description},
+        "costs": {"fee_pct": costs.fee_pct, "slippage_pct": costs.slippage_pct},
+        "candle_time": last.timestamp.isoformat(),
+        "close": last.close,
+        "next_close": (last.timestamp + 2 * period).isoformat(),
+        "rules": rules,
+        "position": position,
+        "signal": signal,
+        "last_closed_trade": trade_dict(closed[-1]) if closed else None,
+        "recent_trades": [trade_dict(t) for t in reversed(closed[-recent:])],
+        "trades_total": len(closed),
+    }
