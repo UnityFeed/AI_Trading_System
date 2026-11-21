@@ -14,7 +14,7 @@ used to choose the strategy, so this view is optimistic. The walk-forward
 
 from datetime import datetime, timedelta
 
-from src.backtesting.conditions import evaluate_all
+from src.backtesting.conditions import evaluate_all, strategy_signals
 from src.backtesting.engine import (
     NO_MARGIN, BacktestResult, CostSettings, MarginSettings, buy_and_hold, run_backtest,
 )
@@ -24,14 +24,7 @@ from src.strategies.registry import StrategyDefinition
 
 
 def signals(market: Market, definition: StrategyDefinition, blocks=None):
-    blocks = blocks or evaluate_all(market)
-    spec = definition.spec
-    entry = [
-        a and b and c for a, b, c in zip(
-            blocks["trend"][spec.trend], blocks["trigger"][spec.trigger], blocks["volume"][spec.volume]
-        )
-    ]
-    return entry, blocks["exit"][spec.exit]
+    return strategy_signals(blocks or evaluate_all(market), definition.spec)
 
 
 def daily_points(result: BacktestResult) -> list[list]:

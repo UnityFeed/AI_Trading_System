@@ -26,7 +26,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from src.analysis.primary_history import get_continuous_history
-from src.backtesting.conditions import evaluate_all
+from src.backtesting.conditions import evaluate_all, strategy_signals
 from src.backtesting.engine import CostSettings, buy_and_hold, run_backtest
 from src.backtesting.market import build_market
 from src.backtesting.search import StrategySpec, all_specs
@@ -52,19 +52,8 @@ CANDIDATES = (
 )
 
 
-def entry_exit(blocks, spec: StrategySpec):
-    entry = [
-        a and b and c for a, b, c in zip(
-            blocks["trend"][spec.trend],
-            blocks["trigger"][spec.trigger],
-            blocks["volume"][spec.volume],
-        )
-    ]
-    return entry, blocks["exit"][spec.exit]
-
-
 def run_full(market, blocks, spec, costs):
-    entry, exit_signal = entry_exit(blocks, spec)
+    entry, exit_signal = strategy_signals(blocks, spec)
     return run_backtest(
         market, range(len(market.candles)), entry, exit_signal,
         spec.stop_atr, costs, record_equity=True,

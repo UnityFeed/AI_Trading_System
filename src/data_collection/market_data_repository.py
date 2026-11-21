@@ -16,11 +16,15 @@ class MarketDataRepository:
     Existing records are migrated as Kraken data.
     """
 
+    @staticmethod
+    def default_path() -> Path:
+        """database/market_data.db in the project folder."""
+        return Path(__file__).resolve().parents[2] / "database" / "market_data.db"
+
     def __init__(self, db_path=None):
 
         if db_path is None:
-            project_root = Path(__file__).resolve().parents[2]
-            db_path = project_root / "database" / "market_data.db"
+            db_path = self.default_path()
 
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)

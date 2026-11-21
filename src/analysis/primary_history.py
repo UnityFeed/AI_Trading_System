@@ -188,6 +188,20 @@ class ContinuousHistory:
         }
 
 
+def _missing_ranges(present: dict, first: datetime, last: datetime) -> list[tuple[datetime, datetime]]:
+    """Stretches of hours in [first, last] that are not in `present`, as (start, end) pairs."""
+    ranges = []
+    hour = first
+    while hour <= last:
+        if hour not in present:
+            if ranges and ranges[-1][1] == hour:
+                ranges[-1] = (ranges[-1][0], hour + _HOUR)
+            else:
+                ranges.append((hour, hour + _HOUR))
+        hour += _HOUR
+    return ranges
+
+
 def get_continuous_history(
     repository: MarketDataRepository,
     start: datetime,
@@ -227,22 +241,29 @@ def get_continuous_history(
             segment.exchange: {c.timestamp: c for c in segment.candles}
         }
 
-        for fill_exchange in FILL_ORDER[segment.exchange]:
-            fill_candles = get_clean_candles(
-                repository=repository,
-                symbol=symbol,
-                market=market,
-                timeframe="1h",
-                start=segment.start,
-                end=segment.end,
-                exchange=fill_exchange,
-                exclusions_file=exclusions_file,
-            )
-            by_exchange[fill_exchange] = {c.timestamp: c for c in fill_candles}
-
-        order = (segment.exchange,) + FILL_ORDER[segment.exchange]
         hour = segment.candles[0].timestamp
         last = segment.candles[-1].timestamp
+
+        # Only the hours the primary exchange lacks are looked up on the
+        # other exchanges (a few hundred hours instead of their full history).
+        missing_ranges = _missing_ranges(by_exchange[segment.exchange], hour, last)
+        for fill_exchange in FILL_ORDER[segment.exchange]:
+            found = {}
+            for range_start, range_end in missing_ranges:
+                for candle in get_clean_candles(
+                    repository=repository,
+                    symbol=symbol,
+                    market=market,
+                    timeframe="1h",
+                    start=range_start,
+                    end=range_end,
+                    exchange=fill_exchange,
+                    exclusions_file=exclusions_file,
+                ):
+                    found[candle.timestamp] = candle
+            by_exchange[fill_exchange] = found
+
+        order = (segment.exchange,) + FILL_ORDER[segment.exchange]
 
         while hour <= last:
             for exchange in order:

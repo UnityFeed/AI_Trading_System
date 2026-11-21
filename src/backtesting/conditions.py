@@ -27,32 +27,30 @@ def _value(market: Market, i: int, name: str):
     return market.rows[i].values.get(name)
 
 
-def _above(market: Market, a: str, b: str | float) -> list[bool]:
-    """a > b, where b is another value name or a fixed number."""
+def _compare(market: Market, a: str, b: str | float, above: bool) -> list[bool]:
+    """a > b (above) or a < b, where a/b are value names ("close" = the candle
+    close) and b may also be a fixed number. Missing values give False."""
+
+    def pick(row, name):
+        return row.close if name == "close" else row.values.get(name)
 
     result = []
-
-    for i, row in enumerate(market.rows):
-        left = row.values.get(a) if a != "close" else row.close
-        right = b if isinstance(b, (int, float)) else (
-            row.values.get(b) if b != "close" else row.close
-        )
-        result.append(left is not None and right is not None and left > right)
-
+    for row in market.rows:
+        left = pick(row, a)
+        right = b if isinstance(b, (int, float)) else pick(row, b)
+        if left is None or right is None:
+            result.append(False)
+        else:
+            result.append(left > right if above else left < right)
     return result
+
+
+def _above(market: Market, a: str, b: str | float) -> list[bool]:
+    return _compare(market, a, b, above=True)
 
 
 def _below(market: Market, a: str, b: str | float) -> list[bool]:
-    result = []
-
-    for row in market.rows:
-        left = row.values.get(a) if a != "close" else row.close
-        right = b if isinstance(b, (int, float)) else (
-            row.values.get(b) if b != "close" else row.close
-        )
-        result.append(left is not None and right is not None and left < right)
-
-    return result
+    return _compare(market, a, b, above=False)
 
 
 def _cross(market: Market, fast: str, slow: str, upward: bool) -> list[bool]:
@@ -114,6 +112,23 @@ EXITS: dict[str, Condition] = {
 
 # ATR stop multiples; None means no stop.
 STOPS: tuple[float | None, ...] = (None, 2.0, 3.0)
+
+
+def strategy_signals(blocks: dict, spec) -> tuple[list[bool], list[bool]]:
+    """
+    Buy and sell signals of one strategy (a StrategySpec) from the
+    building blocks returned by evaluate_all: buy when the trend filter,
+    the trigger and the volume filter are all true.
+    """
+    entry = [
+        trend and trigger and volume
+        for trend, trigger, volume in zip(
+            blocks["trend"][spec.trend],
+            blocks["trigger"][spec.trigger],
+            blocks["volume"][spec.volume],
+        )
+    ]
+    return entry, blocks["exit"][spec.exit]
 
 
 def evaluate_all(market: Market) -> dict[str, dict[str, list[bool]]]:

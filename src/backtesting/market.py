@@ -17,9 +17,10 @@ from src.analysis.primary_history import ContinuousHistory
 from src.analysis.technical_indicators import (
     IndicatorRow,
     IndicatorSettings,
-    calculate_indicators,
+    IndicatorTable,
+    indicator_table,
 )
-from src.analysis.timeframes import TIMEFRAME_HOURS, aggregate_hourly_candles
+from src.analysis.timeframes import TIMEFRAME_HOURS
 from src.data_collection.market_data import MarketData
 
 
@@ -68,10 +69,11 @@ def build_market(
     history: ContinuousHistory,
     timeframe: str,
     settings: IndicatorSettings = IndicatorSettings(),
+    table: IndicatorTable | None = None,
 ) -> Market:
+    """`table` (from indicator_table) skips recomputing the indicators."""
 
-    candles = aggregate_hourly_candles(history.candles, timeframe).candles
-    rows = calculate_indicators(candles, timeframe, settings)
+    candles, rows = table or indicator_table(history.candles, timeframe, settings)
     blocked = untradeable_hours(history)
     step = timedelta(hours=TIMEFRAME_HOURS[timeframe])
 

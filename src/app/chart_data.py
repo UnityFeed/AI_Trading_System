@@ -13,8 +13,8 @@ from bisect import bisect_left
 from dataclasses import dataclass
 
 from src.analysis.primary_history import ContinuousHistory
-from src.analysis.technical_indicators import calculate_indicators
-from src.analysis.timeframes import aggregate_hourly_candles, period_start
+from src.analysis.technical_indicators import IndicatorTable, indicator_table
+from src.analysis.timeframes import period_start
 
 
 INDICATORS = (
@@ -33,9 +33,10 @@ class TimeframeSeries:
     indicators: dict[str, list]  # name -> values aligned with rows (None = not warmed up)
 
 
-def build_series(history: ContinuousHistory, timeframe: str) -> TimeframeSeries:
-    candles = aggregate_hourly_candles(history.candles, timeframe).candles
-    rows = calculate_indicators(candles, timeframe)
+def build_series(
+    history: ContinuousHistory, timeframe: str, table: IndicatorTable | None = None
+) -> TimeframeSeries:
+    candles, rows = table or indicator_table(history.candles, timeframe)
     filled = history.periods_with_substitutes(timeframe)
 
     times = [int(c.timestamp.timestamp()) for c in candles]

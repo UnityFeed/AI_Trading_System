@@ -40,7 +40,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from math import sqrt
 
-from src.analysis.timeframes import split_into_runs
+from src.analysis.timeframes import aggregate_hourly_candles, split_into_runs
 from src.data_collection.market_data import MarketData
 
 
@@ -354,3 +354,24 @@ def calculate_indicators(
             )
 
     return rows
+
+
+# Candles and indicator rows of one timeframe, computed once and shared by
+# the chart, the overview and the backtests.
+IndicatorTable = tuple[list[MarketData], list[IndicatorRow]]
+
+
+def indicator_table(
+    hourly_candles: list[MarketData],
+    timeframe: str,
+    settings: IndicatorSettings = IndicatorSettings(),
+) -> IndicatorTable:
+    candles = aggregate_hourly_candles(hourly_candles, timeframe).candles
+    return candles, calculate_indicators(candles, timeframe, settings)
+
+
+def indicator_tables(
+    hourly_candles: list[MarketData],
+    timeframes: tuple[str, ...] = ("1h", "4h", "1d"),
+) -> dict[str, IndicatorTable]:
+    return {tf: indicator_table(hourly_candles, tf) for tf in timeframes}

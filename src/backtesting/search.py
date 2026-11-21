@@ -31,6 +31,7 @@ from src.backtesting.conditions import (
     TRIGGERS,
     VOLUME_FILTERS,
     evaluate_all,
+    strategy_signals,
 )
 from src.backtesting.engine import (
     BacktestResult,
@@ -121,11 +122,7 @@ def search(
     scores = []
 
     for spec in specs if specs is not None else all_specs():
-        trend = blocks["trend"][spec.trend]
-        trigger = blocks["trigger"][spec.trigger]
-        volume = blocks["volume"][spec.volume]
-        entry = [a and b and c for a, b, c in zip(trend, trigger, volume)]
-        exit_signal = blocks["exit"][spec.exit]
+        entry, exit_signal = strategy_signals(blocks, spec)
 
         results = {
             name: run_backtest(

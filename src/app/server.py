@@ -25,6 +25,7 @@ from src.backtesting.engine import CostSettings, MarginSettings
 from src.backtesting.market import build_market
 from src.backtesting.report import strategy_report, trade_markers_from_report
 from src.strategies.registry import ACTIVE_STRATEGY_ID, STRATEGIES, get_strategy
+from src.analysis.technical_indicators import indicator_tables
 from src.app.routine import daily_routine, load_history
 from src.data_collection.market_data_repository import MarketDataRepository
 from src.paper_trading.store import PaperTradingStore
@@ -54,15 +55,17 @@ class AppState:
     def reload(self) -> None:
         """Rebuild everything shown in the app from the databases."""
         history = load_history(self.repository)
-        series = {tf: build_series(history, tf) for tf in TIMEFRAMES}
+        tables = indicator_tables(history.candles, TIMEFRAMES)
+        series = {tf: build_series(history, tf, tables[tf]) for tf in TIMEFRAMES}
         dashboard = render(
-            gather(self.repository, history, self.store),
+            gather(self.repository, history, self.store, tables=tables),
             nav_html=f"<style>{NAV_CSS}</style>{nav_html('overview')}<script>{NAV_SCRIPT}</script>",
         )
         with self.data_lock:
             self.history = history
             self.series = series
             self.dashboard = dashboard
+            self.tables = tables
             self.markets = {}
             self.reports = {}
 
@@ -75,7 +78,9 @@ class AppState:
             definition = get_strategy(strategy_id)
             market = self.markets.get(definition.timeframe)
             if market is None:
-                market = self.markets[definition.timeframe] = build_market(self.history, definition.timeframe)
+                market = self.markets[definition.timeframe] = build_market(
+                    self.history, definition.timeframe, table=self.tables.get(definition.timeframe)
+                )
             report = strategy_report(
                 market, definition, CostSettings(fee_pct=fee_pct), MarginSettings(leverage=leverage)
             )

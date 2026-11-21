@@ -15,8 +15,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 from src.analysis.primary_history import ContinuousHistory
-from src.analysis.technical_indicators import calculate_indicators
-from src.analysis.timeframes import aggregate_hourly_candles
+from src.analysis.technical_indicators import IndicatorTable, indicator_tables
 from src.backtesting.conditions import evaluate_all
 from src.backtesting.market import build_market
 from src.data_collection.market_data_repository import MarketDataRepository
@@ -150,21 +149,23 @@ def gather(
     history: ContinuousHistory,
     store: PaperTradingStore,
     now: datetime | None = None,
+    tables: dict[str, IndicatorTable] | None = None,
 ) -> DashboardData:
+    """`tables` (from indicator_tables) skips recomputing the indicators."""
 
     now = now or datetime.now(timezone.utc)
+    tables = tables or indicator_tables(history.candles)
     latest_rows = {}
     daily_rows = []
     for timeframe in ("1h", "4h", "1d"):
-        candles = aggregate_hourly_candles(history.candles, timeframe).candles
-        rows = calculate_indicators(candles, timeframe)
+        candles, rows = tables[timeframe]
         if rows:
             latest_rows[timeframe] = rows[-1]
         if timeframe == "1d":
             daily_rows = rows
             daily_candles = candles
 
-    market = build_market(history, ACTIVE_TIMEFRAME)
+    market = build_market(history, ACTIVE_TIMEFRAME, table=tables.get(ACTIVE_TIMEFRAME))
     blocks = evaluate_all(market)
     i = len(market.candles) - 1
     spec = ACTIVE_STRATEGY
