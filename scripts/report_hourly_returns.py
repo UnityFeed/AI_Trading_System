@@ -61,7 +61,7 @@ def main():
         print(f"Stored candles: {len(stored_candles):,}")
         print(f"Available candles: {len(clean_candles):,}")
         print(
-            "Excluded by quality list: "
+            "Excluded (quality list + zero volume): "
             f"{len(stored_candles) - len(clean_candles):,}"
         )
         print(f"Consecutive-hour returns: {len(hourly_returns):,}")

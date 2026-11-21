@@ -7,3 +7,5 @@ __pycache__/
 logs/*
 data/market/*
 data/historical/*
+data/backtests/*
+reports/*

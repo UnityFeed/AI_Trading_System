@@ -8,7 +8,7 @@ from src.data_collection.historical_data_importer import HistoricalDataImporter
 
 def main():
 
-    project_root = Path(__file__).resolve().parents[1]
+    project_root = Path(__file__).resolve().parents[2]  # scripts/archive/ -> project root
 
     csv_path = (
         project_root

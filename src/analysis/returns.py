@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from datetime import timedelta
 
+from src.analysis.timeframes import TIMEFRAME_HOURS
 from src.data_collection.market_data import MarketData
 
 
@@ -24,6 +25,26 @@ def calculate_hourly_returns(
     Candles must belong to one exchange and one symbol.
     Returns across missing or excluded hours are skipped.
     """
+
+    return calculate_returns(candles, "1h")
+
+
+def calculate_returns(
+    candles: list[MarketData],
+    timeframe: str,
+) -> list[PriceReturn]:
+    """
+    Calculate close-to-close returns for consecutive candles of one
+    timeframe ("1h", "4h" or "1d").
+
+    Candles must belong to one exchange and one symbol.
+    Returns across missing or skipped periods are skipped.
+    """
+
+    if timeframe not in TIMEFRAME_HOURS:
+        raise ValueError(f"Unsupported timeframe: {timeframe}")
+
+    step = timedelta(hours=TIMEFRAME_HOURS[timeframe])
 
     if not candles:
         return []
@@ -62,7 +83,7 @@ def calculate_hourly_returns(
         if previous is not None:
             elapsed = candle.timestamp - previous.timestamp
 
-            if elapsed == timedelta(hours=1):
+            if elapsed == step:
                 if previous.close <= 0:
                     raise ValueError(
                         "Previous candle close must be greater than zero."

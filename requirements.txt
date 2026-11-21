@@ -1,0 +1,6 @@
+# The application code uses only the Python standard library
+# (sqlite3, urllib, json, csv, datetime, ...). No third-party
+# packages are needed to run it.
+#
+# Development / testing:
+pytest>=8.0
