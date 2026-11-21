@@ -85,7 +85,9 @@ open, high, low, close, volume. DB primary key:
   - `get_primary_history`: separate single-exchange segments with real gaps,
     for validation and anything that must reflect one exchange only.
 - Backtests must NOT fill orders on substituted hours (the primary exchange was
-  down; nobody could trade there). Signals may use them.
+  down; nobody could trade there). Signals may use them. Also no fills at the
+  open of the first primary-exchange hour after a substituted stretch (Kraken's
+  reopening print is stale; see Status).
 - Never fabricate candles: no interpolation or forward-fill. Gaps that no
   exchange covers stay gaps; rolling windows and returns reset there.
 - Flag suspicious data (see `confirmed_anomalies.csv`); do not silently delete.
@@ -134,6 +136,21 @@ Fully warmed-up rows: 1h kraken 83,592/86,593 (20 runs), 4h 18,773/21,634
 `check_kraken_gaps` (owner, 21 Nov 2026): all 18 Kraken gaps since 2017
 (82 h: Jan 2018 ~50 h, rest 1-5 h) have no Kraken trades at all = real
 outages/maintenance; nothing to rebuild. Hence the continuous history.
+`report_continuous_history` (owner, 21 Nov 2026): 114,981 hourly candles from
+2013-10-06; 108 hours filled (83 Coinbase into Kraken period, 25 Kraken into
+Bitstamp period); 87 hours no exchange has (almost all Bitstamp outage 5-9 Jan
+2015); runs: 1h 21, 4h 6, 1d 5 (1d fully warmed up 4,134/4,786, was 1,350).
+40 source switches, median jump 0.48%, 12 above 1%. Checked against Kraken
+trades and Coinbase/Bitstamp candles:
+- 2017-05-07 22:00: Kraken was 4-5% below Coinbase all evening (Bitstamp close
+  to Kraken); the excluded hour had 2,509 real trades. Excluding it and filling
+  from Coinbase creates a fake +5%/-10% spike. Proposed to owner: un-exclude
+  (mark `keep`). PENDING owner answer.
+- 2019-07-15 01:00 (+6.2%), 2021-01-29 17:00 (+3.7%), Jan 2018, 2024-04-14: the
+  first Kraken trade after maintenance prints at the stale pre-outage price,
+  then the price falls to the other exchanges' level within the hour. Fills are
+  fine; the jump is in Kraken's own reopening candle (stale open, inflated
+  high/low range).
 
 Step 0 results (owner ran on PC, 21 Nov 2026, data current to 2026-11-21 11:00 UTC;
 SQLite integrity ok, 0 duplicates, 0 invalid OHLCV, 0 non-aligned timestamps):
@@ -170,7 +187,8 @@ Known issues:
    so volume features (`volume_sma_20`, `relative_volume_20`) are distorted on
    and just after filled hours and around the 2017 switch. Price indicators are
    barely affected (typical price difference 0.15-0.22%).
-7. Owner to run `report_continuous_history` on the real DB and review jumps > 1%.
+7. Reopening candles after a Kraken outage have a stale open and an inflated
+   high-low range, so ATR and candle-range features spike for that hour.
 
 ## Roadmap (do in order)
 0. [DONE 21 Nov 2026] Data updated and verified (see Status). Bitstamp filler
