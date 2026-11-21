@@ -193,6 +193,28 @@ standing in for Kraken from 2017; NOT the owner's DB), fee 0.80%:
   Bollinger band) did not hold up. Caveat: only 3-15 trades per window, so
   evidence is thin. Must be confirmed on the owner's real DB.
 
+Step 5a CONFIRMED on the owner's real DB (CSVs sent 21 Nov 2026; buy-and-hold
+benchmark taken from the test DB run, Bitstamp era identical data, later years
+within ~0.2%: unseen B&H return ~+26%, calmar 0.07, max drop ~67%):
+| unseen 2022-now: top 10 chosen on 2013-2021 beating B&H (calmar / return) |
+| fee  | 1h            | 4h            | 1d              |
+| 0.40 | 0/10, all 0/540 | 1/10, all 41/540 | 10/10, all 151/408 |
+| 0.80 | 0/10, all 0/540 | 0/10, all 14/540 | 7/10, all 99/408   |
+Best 1d candidates (both fees in the top 10, unseen at 0.80% fee):
+- BUY ema50>ema200 & macd_cross_up | SELL ema20_cross_down_ema50, stop 2xATR:
+  +95.5%, max drop 37%, 15 trades (0.40%: +120.6%)
+- BUY close>ema200 & ema20_cross_up_ema50 | SELL ema20_cross_down_ema50,
+  stop 2xATR: +128.2%, max drop 37%, 9 trades (0.40%: +145.3%)
+- BUY ema50>ema200 & rsi<40 | SELL ema20_cross_down_ema50: +124.4%, max drop
+  52%, 13 trades (the only dip-buy trigger in the top 10, inside an uptrend)
+Building blocks on 1d (median calmar in all three windows): trend filter
+ema50>ema200 and exit ema20_cross_down_ema50 are the most consistent; ATR
+stops add little; exits close>bb_middle and rsi>50 (sell too early) are
+consistently poor; oversold triggers without a trend filter do not hold up.
+Caveats: few trades (3-15 per window); much of the unseen edge comes from
+being out of the market in the 2022 bear market, which a per-year check
+(5c) must confirm is not a single lucky exit.
+
 Step 0 results (owner ran on PC, 21 Nov 2026, data current to 2026-11-21 11:00 UTC;
 SQLite integrity ok, 0 duplicates, 0 invalid OHLCV, 0 non-aligned timestamps):
 | exchange | first candle      | candles | missing hours |
@@ -247,7 +269,8 @@ Known issues:
    NEXT: owner runs `run_backtests` on the real DB.
 5. Find the common ground (owner's main goal): which indicator conditions
    reliably mark good BUY and SELL moments on real data.
-   a. Confirm step 4 findings on the real DB, at 0.80% and 0.40% fees.
+   a. [DONE 21 Nov 2026] Confirm step 4 findings on the real DB, at 0.80% and
+      0.40% fees: daily trend following holds up; 1h/4h do not (see Status).
    b. Widen the building blocks so every indicator is tested in every role
       (e.g. RSI and Bollinger as exits AND as filters, ATR volatility filter,
       MACD histogram turns, EMA distance, volume on exits), plus parameter
