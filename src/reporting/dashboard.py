@@ -439,8 +439,9 @@ document.querySelectorAll('script[data-chart]').forEach(function (node) {
 """
 
 
-def render(data: DashboardData) -> str:
-    out = []
+def render(data: DashboardData, nav_html: str = "") -> str:
+    """The dashboard page; `nav_html` adds the app's navigation and buttons."""
+    out = [nav_html]
     add = out.append
     gen = data.generated_at
 

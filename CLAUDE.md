@@ -35,6 +35,11 @@ validation consider automated execution.
 
 ## Common commands (PowerShell, from the project root)
 Run scripts as modules (`-m scripts.name`, no `.py`) because imports start with `src.`.
+- THE APP (no terminal needed): double-click `start_app.bat` in the project
+  folder. It runs `python -m scripts.run_app`: a local web server on
+  http://127.0.0.1:8765 (this PC only) and opens the browser. Pages: Overview
+  (dashboard) and Chart (interactive). The button "Update data & run paper
+  trader" does the daily routine. Keep the black window open; close it to stop.
 - Activate venv: `.venv\Scripts\Activate.ps1` (then `python` = venv python)
 - DAILY ROUTINE (update data, paper trade, rebuild dashboard):
   `python -m scripts.daily_run` (`--open` opens the page; `--skip-update`;
@@ -92,12 +97,22 @@ Run scripts as modules (`-m scripts.name`, no `.py`) because imports start with 
   page (paper account, strategy state, market readings 1d/4h/1h, data status,
   research summary, commands); inline SVG charts with hover readout,
   light/dark theme
+- `src/app/`: `routine.py` (`daily_routine`, `load_history`: shared by
+  `scripts/daily_run.py` and the app button), `chart_data.py` (candles +
+  indicators per timeframe in chunks, filled-candle flag, trade markers),
+  `chart_page.py` (chart page + shared nav bar; TradingView Lightweight Charts
+  5.2.1 from jsDelivr, Apache 2.0: 1h/4h/1d, scroll back loads older chunks,
+  toggles for EMA 20/50/200, Bollinger, trades, volume, RSI, MACD, ATR),
+  `server.py` (`AppState` caches history/series/dashboard; stdlib
+  ThreadingHTTPServer on 127.0.0.1; POST needs header `X-App-Action: 1`)
+- `src/data_collection/exchange_updater.py`: `update_all_exchanges(repository,
+  log)` (moved from the script; `scripts/update_all_exchanges.py` is a wrapper)
 - `src/risk_management/`, `src/execution/`: empty packages (not started)
 - `scripts/`: import, update, integrity, comparison and anomaly tools
 - `tests/`: data layer, collector, SMA, returns, SMA crossover, data quality,
   primary history, continuous history, timeframes, daily comparison,
   technical indicators, Kraken gap finder, backtesting engine/search, walk-forward,
-  paper trading, dashboard
+  paper trading, dashboard, app (chart data, server routes, button protection)
   (also guards the real `confirmed_anomalies.csv` against format errors).
   `tests/helpers.py` has `hourly_candles()` for building test candles.
 
@@ -156,6 +171,10 @@ open, high, low, close, volume. DB primary key:
   backtest costs. Safety checks only ever BLOCK trades: stale data (> 3 h)
   stops processing; kill switch file blocks new buys. Switching strategy
   requires an explicit account reset (no silent switch).
+- The app is local only: binds 127.0.0.1, never 0.0.0.0. It only reads the
+  market DB except through the daily routine (forward candle update). The chart
+  library is the one external web dependency (pinned version, needs internet);
+  Python code stays standard-library only.
 - Deterministic rules, statistics and trained models form the core; no paid LLM
   call per trade decision. The risk engine must have veto power over any signal.
 - Every future prediction must be timestamped and stored, never rewritten
@@ -287,6 +306,10 @@ dashboard, `daily_run`. Checked in the cloud on the test DB topped up to
 86,638, sell 2026-10-15 at 81,525), -7.4%, same as the backtest's -7.4% for
 candidate 1 in 2026; page renders without errors in light, dark and 390 px
 phone width. Owner still to run `daily_run` on the PC.
+App (roadmap step 7a) built 21 Nov 2026, 197 tests pass: `start_app.bat`,
+Overview + interactive Chart, button for the daily routine. Browser-tested in
+the cloud on the test DB (light, dark, 390 px phone, no JS errors; scrolling back
+on 4h loaded older chunks to 2024; the button ran a real update + paper step).
 
 Step 0 results (owner ran on PC, 21 Nov 2026, data current to 2026-11-21 11:00 UTC;
 SQLite integrity ok, 0 duplicates, 0 invalid OHLCV, 0 non-aligned timestamps):
@@ -360,9 +383,17 @@ Known issues:
    e. Write the surviving rules down as a named strategy with tests.
 6. [DONE 21 Nov 2026] Usable product v1: paper trader following the best
    daily rule, dashboard page, one-command daily routine (see commands).
-7. Product polish (next): schedule `daily_run` automatically (Windows Task
-   Scheduler), show more history and trade statistics on the dashboard, fix
-   known issue 1 (`main.py`), notifications on new decisions.
+7. Product polish:
+   a. [DONE 21 Nov 2026] Click-to-start app (`start_app.bat`), interactive chart
+      over the full history (1h/4h/1d, all indicators, trades), button for the
+      daily routine.
+   b. NEXT: LIVE MODE (owner wants the strategy on a live price chart): stream
+      Kraken's current price into the chart (forming candle updates every few
+      seconds), show the strategy's rule checklist live, and alert when a rule
+      is about to trigger at the close. Decisions stay on completed candles.
+   c. Schedule the daily routine automatically (Windows Task Scheduler), trade
+      statistics on the overview, fix known issue 1 (`main.py`), desktop
+      shortcut with an icon.
 8. Risk engine (proposed paper values, not approved: 0.5% risk per trade, 2% max
    daily loss, 5 positions, 2.5% aggregate open risk, no leverage, stop required,
    emergency shutdown) with veto power over the paper trader.

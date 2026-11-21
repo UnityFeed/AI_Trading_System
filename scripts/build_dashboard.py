@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from src.analysis.primary_history import get_continuous_history
+from src.app.routine import HISTORY_START
 from src.data_collection.market_data_repository import MarketDataRepository
 from src.paper_trading.store import PaperTradingStore
 from src.reporting.dashboard import gather, render
@@ -20,7 +21,6 @@ from src.reporting.dashboard import gather, render
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 OUTPUT = PROJECT_ROOT / "reports" / "dashboard.html"
-HISTORY_START = datetime(2013, 1, 1, tzinfo=timezone.utc)
 
 
 def build(

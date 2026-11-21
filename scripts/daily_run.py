@@ -1,13 +1,11 @@
 """
-The daily routine, in one command:
+The daily routine from the terminal: update the data, run the paper
+trader, rebuild the dashboard page. (The app's button does the same:
+see start_app.bat.)
 
-1. update the hourly candles of Kraken, Bitstamp and Coinbase
-2. let the paper trader process every new completed daily candle
-3. rebuild the dashboard (reports/dashboard.html)
-
-The first run creates a paper account with $10,000 of virtual money. By
-default it replays the strategy from 1 January of this year so the page
-has something to show right away; choose another start with --start.
+The first run creates a paper account with $10,000 of virtual money and
+replays the strategy from 1 January of this year; choose another start
+with --start.
 
 Usage:
     python -m scripts.daily_run
@@ -21,12 +19,10 @@ import webbrowser
 from datetime import datetime, timezone
 from pathlib import Path
 
-from scripts import update_all_exchanges
-from scripts.build_dashboard import HISTORY_START, build
-from src.analysis.primary_history import get_continuous_history
+from scripts.build_dashboard import build
+from src.app.routine import daily_routine
 from src.data_collection.market_data_repository import MarketDataRepository
 from src.paper_trading.store import PaperTradingStore
-from src.paper_trading.trader import PaperTrader
 
 
 def main() -> None:
@@ -38,41 +34,14 @@ def main() -> None:
     parser.add_argument("--paper-db", type=Path, default=None, help=argparse.SUPPRESS)
     args = parser.parse_args()
 
-    if not args.skip_update:
-        print("STEP 1/3  Updating market data")
-        update_all_exchanges.main()
-    else:
-        print("STEP 1/3  Skipped data update")
-
-    print("STEP 2/3  Paper trading")
     repository = MarketDataRepository(args.db) if args.db else MarketDataRepository()
     store = PaperTradingStore(args.paper_db) if args.paper_db else PaperTradingStore()
-    end = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
-    history = get_continuous_history(repository=repository, start=HISTORY_START, end=end)
+    start = datetime.fromisoformat(args.start).replace(tzinfo=timezone.utc) if args.start else None
 
-    trader = PaperTrader(store)
-    if store.get_account() is None:
-        start = (
-            datetime.fromisoformat(args.start).replace(tzinfo=timezone.utc)
-            if args.start else datetime(end.year, 1, 1, tzinfo=timezone.utc)
-        )
-        print(f"  New paper account: $10,000, acting from {start:%Y-%m-%d}")
-        trader.ensure_account(start)
-    elif args.start:
-        print("  --start ignored: the paper account already exists.")
+    history = daily_routine(repository, store, update=not args.skip_update, start=start)
 
-    report = trader.step(history)
-    for line in report.warnings:
-        print(f"  WARNING: {line}")
-    print(f"  {len(report.decisions)} new decision(s), {len(report.fills)} new fill(s)")
-    for line in report.decisions[-5:]:
-        print(f"    {line}")
-    for line in report.fills:
-        print(f"    FILL {line}")
-
-    print("STEP 3/3  Building the dashboard")
     path = build(repository, store, history)
-    print(f"  Dashboard: {path}")
+    print(f"Dashboard: {path}")
     if args.open:
         webbrowser.open(path.as_uri())
 

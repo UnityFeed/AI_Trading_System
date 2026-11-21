@@ -12,3 +12,10 @@ A modular, paper-trading-first automated trading platform.
 - Performance monitoring
 
 Live trading is not enabled.
+
+## Start the app
+
+Double-click `start_app.bat` in the project folder. A browser tab opens with
+the overview and an interactive chart; the button "Update data & run paper
+trader" runs the daily routine. Keep the black window open while you use it.
+See `CLAUDE.md` for all commands.
