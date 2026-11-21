@@ -55,6 +55,8 @@ class BacktestResult:
     max_drawdown_pct: float
     exposure_pct: float  # share of candles holding BTC
     trades: list[Trade] = field(default_factory=list)
+    # (candle timestamp, account value at its close); only when requested
+    equity_curve: list[tuple[datetime, float]] = field(default_factory=list)
 
     @property
     def total_return_pct(self) -> float:
@@ -98,6 +100,7 @@ def run_backtest(
     exit: list[bool],
     stop_atr: float | None = None,
     costs: CostSettings = CostSettings(),
+    record_equity: bool = False,
 ) -> BacktestResult:
     """
     Simulate one strategy on market candles with indexes in `window`.
@@ -125,6 +128,7 @@ def run_backtest(
     max_drawdown = 0.0
     held_candles = 0
     trades: list[Trade] = []
+    curve: list[tuple[datetime, float]] = []
 
     for i in window:
         candle = candles[i]
@@ -159,6 +163,8 @@ def run_backtest(
 
         # 2. Value the account at the close.
         equity = cash + btc * candle.close
+        if record_equity:
+            curve.append((candle.timestamp, equity))
         if btc > 0:
             held_candles += 1
         peak = max(peak, equity)
@@ -196,6 +202,7 @@ def run_backtest(
         max_drawdown_pct=max_drawdown * 100.0,
         exposure_pct=held_candles / len(window) * 100.0,
         trades=trades,
+        equity_curve=curve,
     )
 
 
@@ -203,6 +210,7 @@ def buy_and_hold(
     market: Market,
     window: range,
     costs: CostSettings = CostSettings(),
+    record_equity: bool = False,
 ) -> BacktestResult:
     """
     Buy at the first tradeable open inside the window and hold until the
@@ -223,9 +231,12 @@ def buy_and_hold(
 
     peak = 1.0
     max_drawdown = 0.0
+    curve: list[tuple[datetime, float]] = []
 
     for i in window:
         equity = 1.0 if i < first else btc * candles[i].close
+        if record_equity:
+            curve.append((candles[i].timestamp, equity))
         peak = max(peak, equity)
         max_drawdown = max(max_drawdown, (peak - equity) / peak)
 
@@ -247,4 +258,5 @@ def buy_and_hold(
             return_pct=(final - 1.0) * 100.0,
             exit_reason="end",
         )],
+        equity_curve=curve,
     )

@@ -50,6 +50,8 @@ Run scripts as modules (`-m scripts.name`, no `.py`) because imports start with 
 - Strategy search / backtest (all indicator combinations, 1h/4h/1d, ~30 s):
   `python -m scripts.run_backtests` (options: `--fee 0.40`, `--slippage 0.05`,
   `--timeframes 4h 1d`). Full results as CSV in `data/backtests/` (gitignored).
+- Full-history test: candidates year by year + walk-forward (~1 min):
+  `python -m scripts.run_walk_forward` (options: `--fee 0.40`, `--timeframes 1d`)
 
 ## Architecture (keep it; do not redesign without a clear reason)
 - `src/data_collection/`: `MarketData` dataclass, `data_validator`, `MarketDataProvider`
@@ -69,13 +71,15 @@ Run scripts as modules (`-m scripts.name`, no `.py`) because imports start with 
 - `src/backtesting/`: `market.py` (`build_market`: candles + indicators +
   which opens are tradeable), `conditions.py` (entry building blocks in three
   roles: trend filter, trigger, volume filter; exit rules; ATR stops),
-  `engine.py` (`run_backtest`, `buy_and_hold`, `CostSettings`), `search.py`
-  (all 540 combinations, selection/test windows, ranking)
+  `engine.py` (`run_backtest`, `buy_and_hold`, `CostSettings`; optional
+  `record_equity`), `search.py` (all 540 combinations, selection/test windows,
+  ranking), `walk_forward.py` (one continuous run per combination summarised per
+  year; yearly walk-forward picks chosen only on earlier years)
 - `src/risk_management/`, `src/execution/`: empty packages (not started)
 - `scripts/`: import, update, integrity, comparison and anomaly tools
 - `tests/`: data layer, collector, SMA, returns, SMA crossover, data quality,
   primary history, continuous history, timeframes, daily comparison,
-  technical indicators, Kraken gap finder, backtesting engine/search
+  technical indicators, Kraken gap finder, backtesting engine/search, walk-forward
   (also guards the real `confirmed_anomalies.csv` against format errors).
   `tests/helpers.py` has `hourly_candles()` for building test candles.
 
@@ -169,8 +173,8 @@ Bitstamp period); 87 hours no exchange has (almost all Bitstamp outage 5-9 Jan
 trades and Coinbase/Bitstamp candles:
 - 2017-05-07 22:00: Kraken was 4-5% below Coinbase all evening (Bitstamp close
   to Kraken); the excluded hour had 2,509 real trades. Excluding it and filling
-  from Coinbase creates a fake +5%/-10% spike. Proposed to owner: un-exclude
-  (mark `keep`). PENDING owner answer.
+  from Coinbase creates a fake +5%/-10% spike. Owner decided 21 Nov 2026:
+  un-excluded, now `keep` (`genuine_kraken_divergence`).
 - 2019-07-15 01:00 (+6.2%), 2021-01-29 17:00 (+3.7%), Jan 2018, 2024-04-14: the
   first Kraken trade after maintenance prints at the stale pre-outage price,
   then the price falls to the other exchanges' level within the hour. Fills are
@@ -215,6 +219,22 @@ Caveats: few trades (3-15 per window); much of the unseen edge comes from
 being out of the market in the 2022 bear market, which a per-year check
 (5c) must confirm is not a single lucky exit.
 
+Step 5c (part) full-history test, `run_walk_forward`, first run on the cloud
+TEST database (same caveat as step 4; owner to confirm on the real DB),
+fee 0.80%:
+- The 3 daily candidates over 2013-now: +10,000% to +21,000% vs buy-and-hold
+  +48,000%; worst drop 61-77% vs 85%; they beat buy-and-hold in only 6-7 of 14
+  years. They win in falling years (2018, 2022, 2025-26: losses cut to roughly
+  a third or less) and lag badly in strong rising years (2017, 2019, 2020,
+  2023, 2024). The 2022-now "unseen" win came mostly from sitting out 2022.
+- Walk-forward 2016-2026 (each year's pick chosen only on earlier years):
+  1d +794% (worst drop 52%) vs buy-and-hold +13,550% (84%); 4h +643% (56%);
+  1h -89% (96%). Picks beat buy-and-hold in 3-4 of 11 years. Even per unit of
+  risk buy-and-hold wins (1d: ~22%/yr over 52% drop vs ~57%/yr over 84%).
+- Conclusion so far: the trend rules are a DEFENSIVE filter (smaller crashes,
+  calmer ride), not a way to beat holding BTC. They give up most of the bull
+  markets. Recurring pick: trend filter ema50>ema200 + EMA20/50 or MACD cross.
+
 Step 0 results (owner ran on PC, 21 Nov 2026, data current to 2026-11-21 11:00 UTC;
 SQLite integrity ok, 0 duplicates, 0 invalid OHLCV, 0 non-aligned timestamps):
 | exchange | first candle      | candles | missing hours |
@@ -230,8 +250,12 @@ NOT apply `confirmed_anomalies.csv`: its 171.96% (bitstamp/kraken) and 19.33%
 (coinbase/kraken) maxima are the known Kraken anomalies 2013-11-10 04:00 and
 2015-11-03 10:00 (difference is relative to the mean of the two closes).
 Outlier review: Coinbase 2017-12-07 15-18h `keep` (genuine premium); Kraken
-2017-05-07 22:00 excluded (owner, `exclude_owner_reviewed`); five pre-2017 Kraken
-hours stay `review_pending` (not used by the primary history).
+2017-05-07 22:00 `keep` (was excluded, un-excluded by owner 21 Nov 2026 after
+checking Kraken trades); five pre-2017 Kraken hours stay `review_pending` (not
+used by the primary history). Excluded candles now: 4 (3 Kraken pre-2016,
+1 Coinbase 2017-04-15). Lesson: before excluding a primary-exchange hour,
+check that exchange's own neighbouring hours and trade count, not only other
+exchanges.
 
 Known issues:
 1. `main.py` prints "Database: Connected" without testing the connection, and only
@@ -275,9 +299,10 @@ Known issues:
       (e.g. RSI and Bollinger as exits AND as filters, ATR volatility filter,
       MACD histogram turns, EMA distance, volume on exits), plus parameter
       variants (RSI levels, EMA pairs).
-   c. Stronger checks against luck: rolling walk-forward (choose on N years,
-      test on the next year, repeat), per-year results, minimum trades, and
-      compare against random entries with the same exposure.
+   c. Stronger checks against luck: [DONE 21 Nov 2026, test DB] yearly
+      walk-forward and per-year results (`run_walk_forward`); owner to run it on
+      the real DB. Still to do: compare against random entries with the same
+      exposure.
    d. Limit-order (maker fee) execution model, since fees decide the 1h/4h result.
    e. Write the surviving rules down as a named strategy with tests.
 6. Risk engine (proposed paper values, not approved: 0.5% risk per trade, 2% max
