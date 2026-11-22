@@ -12,6 +12,7 @@ from contextlib import closing
 from datetime import datetime, timezone
 
 from src.data_collection.market_data_repository import MarketDataRepository
+from src.paper_trading.accounts import EXTRA_ACCOUNTS
 from src.paper_trading.store import DEFAULT_PATH as PAPER_DB
 
 
@@ -46,18 +47,21 @@ def main() -> None:
                 print(f"  {exchange:<9} {count:>8,} hourly candles, latest {latest} ({hours_old:.0f} h ago)")
 
     print()
-    if not PAPER_DB.is_file():
-        print("Paper account: none yet (created by the first daily run)")
-    else:
-        with read_only(PAPER_DB) as connection:
-            account = connection.execute(
-                "SELECT strategy, starting_cash, cash, btc FROM account WHERE id = 1"
-            ).fetchone()
+    accounts = [("Paper account (main)", PAPER_DB)] + [
+        (f"Paper account '{a.id}'", PAPER_DB.parent / a.filename) for a in EXTRA_ACCOUNTS
+    ]
+    for label, path in accounts:
+        account = None
+        if path.is_file():
+            with read_only(path) as connection:
+                account = connection.execute(
+                    "SELECT strategy, starting_cash, cash, btc FROM account WHERE id = 1"
+                ).fetchone()
         if account is None:
-            print("Paper account: none yet (created by the first daily run)")
+            print(f"{label}: none yet (created by the first daily run)")
         else:
             strategy, start, cash, btc = account
-            print(f"Paper account: {strategy}")
+            print(f"{label}: {strategy}")
             print(f"  started with ${start:,.2f}; now ${cash:,.2f} cash and {btc:.6f} BTC")
 
     print()

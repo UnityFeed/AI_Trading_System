@@ -232,3 +232,40 @@ class TestServer(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestExtraPaperAccounts(unittest.TestCase):
+
+    def test_routine_runs_every_account_and_the_overview_lists_them(self):
+        from src.app.overview_page import overview_page
+        from src.app.routine import daily_routine
+        from src.paper_trading.accounts import EXTRA_ACCOUNTS, ExtraAccount
+        from src.reporting.dashboard import exchange_status
+
+        with tempfile.TemporaryDirectory() as folder:
+            folder = Path(folder)
+            repository = make_repository(folder)
+            main = PaperTradingStore(folder / "paper.db")
+            extras = [
+                (ExtraAccount(a.id, a.strategy_id, a.filename, a.starting_cash, START), PaperTradingStore(folder / a.filename))
+                for a in EXTRA_ACCOUNTS
+            ]
+            now = START + timedelta(hours=HOURS)
+            log = []
+            with patch("src.app.routine.datetime") as fake, patch("src.paper_trading.trader.datetime") as fake2:
+                for f in (fake, fake2):
+                    f.now.return_value = now
+                    f.side_effect = lambda *a, **k: datetime(*a, **k)
+                history = daily_routine(repository, main, update=False, log=log.append, extra_accounts=extras)
+
+            for config, store in extras:
+                account = store.get_account()
+                self.assertIsNotNone(account, config.id)
+                self.assertEqual(account.starting_cash, 3500.0)
+                self.assertTrue(store.decisions())
+            self.assertTrue(any("Paper account 'lab'" in line for line in log))
+
+            page = overview_page(history, exchange_status(repository, now), main.get_account(), False,
+                                 [(c.definition.name, s.get_account()) for c, s in extras])
+            self.assertIn("Side by side", page)
+            self.assertIn("Lab: weekly MACD", page)

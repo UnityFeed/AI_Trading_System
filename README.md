@@ -17,6 +17,9 @@ Double-click **`start_app.bat`** in this folder. A browser tab opens:
 | **Chart** | Candlesticks for the whole history (1h / 4h / 1d) with EMA, Bollinger, volume, RSI, MACD and ATR; trades of the paper account or of any strategy's backtest |
 | **Strategy tester** | All strategies compared side by side; any strategy over 2013 to now (or from any start year): result per year, every trade, Sharpe, break-even fee, fee levels, optional margin simulation |
 
+Three paper accounts run side by side (the Overview compares them): your main account
+(Daily trend + MACD) and two $3,500 accounts for the best two strategies so far.
+
 The button **Update data & run paper trader** downloads the newest candles
 (and the free Coin Metrics MVRV and hash-rate data) and lets the paper
 trader act on them. Keep the black window open while you

@@ -145,6 +145,8 @@ Run scripts as modules (`-m scripts.name`, no `.py`) because imports start with 
   `ledger.py` (trials ledger CSV)
 - `src/paper_trading/`: `store.py` (`PaperTradingStore`, own SQLite file
   `database/paper_trading.db`: account, append-only decisions and fills),
+  `accounts.py` (`EXTRA_ACCOUNTS`, `open_extra_accounts`: extra paper
+  accounts side by side, one SQLite file each in database/),
   `trader.py` (`PaperTrader`, `ACTIVE_STRATEGY` = candidate 1 on 1d, $10,000
   start, safety checks: stale data, kill switch; also follows graded
   strategies: a BUY/SELL moves the account to the target share stored in the
@@ -261,6 +263,14 @@ open, high, low, close, volume. DB primary key:
   backtest costs. Safety checks only ever BLOCK trades: stale data (> 3 h)
   stops processing; kill switch file blocks new buys. Switching strategy
   requires an explicit account reset (no silent switch).
+- Paper accounts side by side (owner, 22 Nov 2026, "option 2"): the main
+  account (`paper_trading.db`, candidate 1 "Daily trend + MACD", $10,000 from
+  1 Jan 2026) stays untouched; extra accounts in `src/paper_trading/accounts.py`
+  each follow one strategy with $3,500 (about the owner's real 3.5k) from
+  2026-11-22: `paper_lab.db` = "Lab: weekly MACD + momentum, 50% core",
+  `paper_core50.db` = "50% core + Daily trend + MACD". The daily routine and the
+  app button run all of them; the Overview shows them side by side; `main.py`
+  lists them. Compare after >= 3 months before choosing one.
 - The app is local only: binds 127.0.0.1, never 0.0.0.0. It only reads the
   market DB except through the daily routine (forward candle update). The chart
   library is the one external web dependency (pinned version, needs internet);
@@ -707,7 +717,10 @@ Known issues:
       registry so it gets the Strategy tester, chart and overview.
    d. External data with immutable snapshots and 1-2 day lags: Coin Metrics
       MVRV (S8 cap) and hash rate (S9 entry filter).
-   e. Survivor -> paper trading for >= 3 months (restart the paper account).
+   e. Survivor -> paper trading for >= 3 months. [STARTED 22 Nov 2026] Owner
+      chose to run candidates side by side instead of a reset: lab strategy
+      and 50% core + trend + MACD, $3,500 each from 2026-11-22, next to the
+      main account. Review around late Feb 2027.
       NEXT, owner decision: switch the paper account to "50% core + Daily
       trend + MACD" (needs `ACTIVE_STRATEGY_ID` change + account reset) or keep
       candidate 1. Ideas that respect the 0.80% fee: weekly decisions or a

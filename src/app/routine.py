@@ -3,6 +3,7 @@ The daily routine, shared by the terminal command (scripts/daily_run.py)
 and the app's button:
 
 1. update the hourly candles of Kraken, Bitstamp and Coinbase
+   (and run every extra paper account side by side, src/paper_trading/accounts.py)
 2. update the free external daily data (Coin Metrics: MVRV, market cap,
    hash rate), when a store is given; a failure here is reported but does
    not stop the routine
@@ -34,7 +35,9 @@ def daily_routine(
     start: datetime | None = None,
     log=print,
     external_store: ExternalDataStore | None = None,
+    extra_accounts=(),
 ) -> ContinuousHistory:
+    """`extra_accounts`: (ExtraAccount, PaperTradingStore) pairs run after the main account."""
     """Run the routine and return the refreshed history."""
 
     if update:
@@ -73,4 +76,25 @@ def daily_routine(
         log(f"    {line}")
     for line in report.fills:
         log(f"    FILL {line}")
+
+    for config, extra_store in extra_accounts:
+        definition = config.definition
+        log(f"  Paper account '{config.id}': {definition.name}")
+        try:
+            extra = PaperTrader(extra_store, definition.exposure or definition.spec, definition.timeframe,
+                                external=external)
+            if extra_store.get_account() is None:
+                log(f"    New paper account: ${config.starting_cash:,.0f}, acting from {config.start:%Y-%m-%d}")
+                extra.ensure_account(config.start, cash=config.starting_cash)
+            step = extra.step(history)
+        except Exception as error:  # one account failing must not stop the others
+            log(f"    ERROR: {error}")
+            continue
+        for line in step.warnings:
+            log(f"    WARNING: {line}")
+        log(f"    {len(step.decisions)} new decision(s), {len(step.fills)} new fill(s)")
+        for line in step.decisions[-3:]:
+            log(f"      {line}")
+        for line in step.fills:
+            log(f"      FILL {line}")
     return history

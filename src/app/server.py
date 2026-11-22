@@ -54,9 +54,10 @@ MAX_CHUNK = 5000
 class AppState:
 
     def __init__(self, repository: MarketDataRepository, store: PaperTradingStore,
-                 external_store: ExternalDataStore | None = None):
+                 external_store: ExternalDataStore | None = None, extra_accounts=()):
         self.repository = repository
         self.store = store
+        self.extra_accounts = list(extra_accounts)  # (ExtraAccount, PaperTradingStore)
         self.external_store = external_store
         self.job_lock = threading.Lock()
         self.data_lock = threading.Lock()
@@ -104,7 +105,8 @@ class AppState:
     def overview(self) -> str:
         with self.data_lock:
             history, exchanges = self.history, self.exchanges
-        return overview_page(history, exchanges, self.store.get_account(), KILL_SWITCH.exists())
+        extras = [(config.definition.name, store.get_account()) for config, store in self.extra_accounts]
+        return overview_page(history, exchanges, self.store.get_account(), KILL_SWITCH.exists(), extras)
 
     def start_years(self) -> list[int]:
         """Years a test can start in: every full calendar year in the data."""
@@ -170,7 +172,7 @@ class AppState:
     def _run(self, update: bool) -> None:
         try:
             daily_routine(self.repository, self.store, update=update, log=self._write,
-                          external_store=self.external_store)
+                          external_store=self.external_store, extra_accounts=self.extra_accounts)
             self._write("Refreshing charts and overview...")
             self.reload()
             self._write("Done.")

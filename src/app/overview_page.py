@@ -167,8 +167,32 @@ PAGE_SCRIPT = r"""
 """
 
 
-def overview_page(history, exchanges, account, kill_switch_on: bool) -> str:
-    """The Overview page; `exchanges` from dashboard.exchange_status."""
+def accounts_table(latest_close: float | None, rows) -> str:
+    """Paper accounts side by side. rows: (strategy name, Account or None)."""
+    out = ["<div class='table-scroll'><table class='compact'><tr><th>Strategy</th><th>Since</th>"
+           "<th class='num'>Start</th><th class='num'>Value now</th><th class='num'>Result</th>"
+           "<th class='num'>In BTC</th></tr>"]
+    for name, account in rows:
+        if account is None:
+            out.append(f"<tr><td>{esc(name)}</td><td colspan='5' class='muted'>starts at the next run of the "
+                       "daily routine</td></tr>")
+            continue
+        price = latest_close or 0.0
+        value = account.cash + account.btc * price
+        share = account.btc * price / value * 100 if value > 0 else 0.0
+        out.append(
+            f"<tr><td>{esc(name)}</td><td>{account.start_candle:%Y-%m-%d}</td>"
+            f"<td class='num'>{fmt_price(account.starting_cash)}</td><td class='num'>{fmt_price(value)}</td>"
+            f"<td class='num'>{fmt_pct((value / account.starting_cash - 1) * 100)}</td>"
+            f"<td class='num'>{share:.0f}%</td></tr>"
+        )
+    out.append("</table></div>")
+    return "".join(out)
+
+
+def overview_page(history, exchanges, account, kill_switch_on: bool, extras=()) -> str:
+    """The Overview page; `exchanges` from dashboard.exchange_status;
+    `extras`: (strategy name, Account or None) of the extra paper accounts."""
 
     candles = history.candles
     latest = candles[-1] if candles else None
@@ -213,6 +237,12 @@ def overview_page(history, exchanges, account, kill_switch_on: bool) -> str:
             f"<div><div class='label'>Position</div><div class='value'>{'In BTC' if account.btc > 0 else 'In cash'}</div>"
             f"<div class='muted small'>{account.btc:.6f} BTC</div></div></div>"
             f"<p class='muted small'>{esc(account.strategy)}. Every decision is logged and never changed.</p>")
+    if extras:
+        add("<h3 class='small' style='margin:14px 0 6px'>Side by side</h3>")
+        add(accounts_table(latest.close if latest else None,
+                           [("Main account (active strategy)", account)] + list(extras)))
+        add("<p class='muted small'>Each account follows one strategy with its own virtual money, "
+            "on the same days: the fair comparison going forward.</p>")
         if kill_switch_on:
             add("<p class='notice'>Kill switch is ON: no new paper buys.</p>")
     add("</section>")
