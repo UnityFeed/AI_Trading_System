@@ -1,6 +1,6 @@
 # AI Trading System: project guide for Claude Code
 
-Last updated: 21 Nov 2026. Owner: UnityFeed (beginner in Python, learning while building).
+Last updated: 22 Nov 2026. Owner: UnityFeed (beginner in Python, learning while building).
 
 **Keep this file current.** Whenever a roadmap step, known issue or decision
 changes, update the relevant section here in the same commit.
@@ -47,7 +47,9 @@ Run scripts as modules (`-m scripts.name`, no `.py`) because imports start with 
   backtest: vs buy-and-hold, per year, every trade, 0.80%/0.40% fees, margin
   Off/2x/3x/5x/10x, "Test from" full history or 1 Jan of any year, "BTC
   compared with holding" ratio, and an "If you had started in..." table with
-  every start year). The button "Update data & run paper
+  every start year; an "All strategies compared" table at the top; Sharpe,
+  Sortino, break-even fee, top-20 days, exposure-matched mix; graded
+  strategies show every change of the BTC share). The button "Update data & run paper
   trader" does the daily routine. Keep the black window open; close it to stop.
 - Activate venv: `.venv\Scripts\Activate.ps1` (then `python` = venv python)
 - DAILY ROUTINE (update data, paper trade, rebuild dashboard):
@@ -75,6 +77,18 @@ Run scripts as modules (`-m scripts.name`, no `.py`) because imports start with 
   `--timeframes 4h 1d`). Full results as CSV in `data/backtests/` (gitignored).
 - Full-history test: candidates year by year + walk-forward (~1 min):
   `python -m scripts.run_walk_forward` (options: `--fee 0.40`, `--timeframes 1d`)
+- Strategy research, every REGISTERED strategy with the same test (full
+  history, eras, fee sensitivity, Sharpe/Sortino, break-even fee, top-20 days,
+  exposure-matched mix, start years, Deflated Sharpe, PBO; ~5 s):
+  `python -m scripts.run_strategy_research` (`--fee 0.40`, `--no-log`).
+  `run_backtests`, `run_walk_forward` and this script append to the trials
+  ledger `data/backtests/trials.csv` (gitignored, append-only).
+- External daily data (Coin Metrics: MVRV, market cap, hash rate; free, no
+  key): `python -m scripts.update_external_data` (the daily routine and the
+  app button also do it) -> `database/external_data.db`
+- Order book + buy/sell order flow recorder (Kraken, from now on): double-click
+  `start_recorder.bat` or `python -m scripts.record_order_flow` (`--once`,
+  first run `--days 30`) -> `database/order_flow.db`
 
 ## Architecture (keep it; do not redesign without a clear reason)
 - `src/data_collection/`: `MarketData` dataclass, `data_validator`, `MarketDataProvider`
@@ -91,8 +105,9 @@ Run scripts as modules (`-m scripts.name`, no `.py`) because imports start with 
   `timeframes.py` (`aggregate_hourly_candles`: 1h -> 4h/1d; `split_into_runs`:
   consecutive-candle runs for any timeframe), `daily_comparison.py`
 - `src/strategies/registry.py`: `STRATEGIES` (every known strategy: id, name,
-  timeframe, `StrategySpec`, plain-language description, origin) and
-  `ACTIVE_STRATEGY_ID` (followed by the paper trader)
+  timeframe, `StrategySpec` (kind "rules", all-in/all-out) or `ExposureSpec`
+  (kind "exposure", graded 0-100% BTC), plain-language description, origin)
+  and `ACTIVE_STRATEGY_ID` (followed by the paper trader)
 - `src/strategies/sma_crossover.py`: long-only crossover signals (older, hourly)
 - `src/backtesting/`: `market.py` (`build_market`: candles + indicators +
   which opens are tradeable), `conditions.py` (entry building blocks in three
@@ -105,11 +120,22 @@ Run scripts as modules (`-m scripts.name`, no `.py`) because imports start with 
   JSON-ready: summary, per year, trades, daily equity; trade markers;
   `strategy_state`: rules at the latest close, open trade with its result if
   sold now and stop, BUY/SELL signal to be carried out at the next open,
-  recent trades; same continuous run as the backtest)
+  recent trades; same continuous run as the backtest; `prepare` +
+  `run_strategy` run either kind; `exposure_state` for graded ones),
+  `features.py` (SMA, n-candle return, prior high/low, EWMA volatility; reset
+  at gaps), `exposure.py` (graded strategies: `ExposureSpec`, `VOTES`, layers
+  core/fixed weight -> volatility cap -> MVRV-Z cap (1-day lag) -> hash-rate
+  filter (2-day lag); `plan`, `run_exposure_backtest` (band, fees on the
+  traded amount, same fill timing), `fixed_mix` = exposure-matched benchmark),
+  `metrics.py` (Sharpe, Sortino, top-20-days capture, break-even fee,
+  turnover), `validation.py` (Deflated Sharpe Ratio, PBO by CSCV),
+  `ledger.py` (trials ledger CSV)
 - `src/paper_trading/`: `store.py` (`PaperTradingStore`, own SQLite file
   `database/paper_trading.db`: account, append-only decisions and fills),
   `trader.py` (`PaperTrader`, `ACTIVE_STRATEGY` = candidate 1 on 1d, $10,000
-  start, safety checks: stale data, kill switch)
+  start, safety checks: stale data, kill switch; also follows graded
+  strategies: a BUY/SELL moves the account to the target share stored in the
+  decision snapshot, no schema change)
 - `src/reporting/dashboard.py`: `gather` + `render` -> the OFFLINE overview file
   written by `daily_run`/`build_dashboard` (the app has its own Overview); (key
   numbers + BTC price, paper account chart, strategy today, latest decisions,
@@ -131,6 +157,14 @@ Run scripts as modules (`-m scripts.name`, no `.py`) because imports start with 
   active strategy),
   `server.py` (`AppState` caches history/series/dashboard/markets/reports; stdlib
   ThreadingHTTPServer on 127.0.0.1; POST needs header `X-App-Action: 1`)
+- `src/data_collection/external_data.py`: `ExternalDataStore`
+  (`database/external_data.db`; first value seen is kept, later changes go to
+  a `revisions` table), `fetch_coinmetrics`, `update_external_data`
+- `src/data_collection/order_flow.py`: `OrderFlowStore`
+  (`database/order_flow.db`: hourly buy/sell volume + exact VWAP from Kraken
+  trades, order-book snapshot summaries), `collect_trade_flow`,
+  `run_recorder`. Collected only; no strategy uses it yet.
+  `KrakenTradesProvider.fetch_trades_with_side` keeps the taker side.
 - `src/data_collection/exchange_updater.py`: `update_all_exchanges(repository,
   log)` (moved from the script; `scripts/update_all_exchanges.py` is a wrapper)
 - `src/risk_management/`, `src/execution/`: empty packages (not started)
@@ -285,6 +319,34 @@ Where the reports conflict with this project, the project wins:
   every backtest trial.
 
 ## Status
+Roadmap 9a-9d BUILT 22 Nov 2026 (owner: "do everything"), 250 tests pass.
+First run on the cloud TEST DB (real external data from Coin Metrics, not the
+owner's DB; owner to run `run_strategy_research` on the PC), fee 0.80%, full
+history 2013-now, buy and hold +47,586% (worst drop 85%, Sharpe 1.02):
+| strategy                    | total     | vs hold | drop | Sharpe | BE fee | starts ahead |
+| Daily trend + MACD          | +21,024%  | x0.44   | 68%  | 1.08   | never  | 10/13 |
+| 50% core + trend + MACD     | +47,917%  | x1.01   | 72%  | 1.12   | 0.83%  | 10/13 |
+| S1 averages 20/50/100       | +4,332%   | x0.09   | 64%  | 0.88   | never  | 2/13  |
+| S2 momentum 1-6 months      | +9,272%   | x0.20   | 70%  | 1.00   | never  | 3/13  |
+| S3 50% core + averages      | +9,565%   | x0.20   | 72%  | 0.94   | never  | 4/13  |
+| S4 averages + vol cap       | +2,965%   | x0.06   | 61%  | 0.90   | never  | 2/13  |
+| S5 60% rebalanced           | +11,136%  | x0.24   | 64%  | 1.05   | never  | 3/13  |
+| S6 averages + breakout      | +4,272%   | x0.09   | 61%  | 0.89   | never  | 2/13  |
+| S8 averages + MVRV cap      | +1,435%   | x0.03   | 57%  | 0.74   | never  | 2/13  |
+| S9 averages + hash filter   | +4,627%   | x0.10   | 62%  | 0.90   | never  | 1/13  |
+- The report's S1-S9 fail at our fee: S1-type daily votes trade 13-21x the
+  account per year (S5: 0.4x). Even at 0.10% fee S1 only reaches x0.61.
+  The research assumed 0.10-0.26% fees; Kraken's 0.80% decides the result.
+- Best: 50% core + our Daily trend + MACD overlay: level with holding over
+  the full history with a smaller drop, ahead from 10/13 start years,
+  Sharpe 1.12 vs 1.02, x1.70 vs the fixed 79% mix (the timing adds value),
+  x1.21 at 0.10% fee. Its overlay was chosen on 2013-2021, so optimistic.
+- Luck checks: Deflated Sharpe "Sharpe > 0" ~1.0 for all (easy in a bull
+  market); "beats holding" (daily return above buy-and-hold) 0.00-0.01 for
+  all: no strategy convincingly beats holding day by day. PBO across the 12
+  = 0.39 (ranking carries over only weakly).
+- Order-flow recorder tested live 22 Nov 2026: 130,559 Kraken trades in 24 h
+  -> 24 hourly rows; order book 500 levels reach ~1.5% below / 3.5% above.
 Done: data layer for 3 exchanges, update/import scripts, integrity, comparison and
 anomaly tooling, SMA, hourly returns, SMA crossover signals.
 21 Nov 2026: roadmap step 1 done (requirements.txt, collector tests rewritten for
@@ -521,8 +583,9 @@ Known issues:
 8. Risk engine (proposed paper values, not approved: 0.5% risk per trade, 2% max
    daily loss, 5 positions, 2.5% aggregate open risk, no leverage, stop required,
    emergency shutdown) with veto power over the paper trader.
-9. Strategy research, based on `docs/research/` (PROPOSED 22 Nov 2026, waiting
-   for owner go-ahead; replaces the parked 5b-5e list):
+9. Strategy research, based on `docs/research/` (owner go-ahead 22 Nov 2026;
+   replaces the parked 5b-5e list). a-d BUILT 22 Nov 2026 (see Status);
+   owner to run `run_strategy_research` on the real DB:
    a. Engine: target exposure 0-100% (graded, rebalance only when the change is
       >= a band, fees on the traded amount), exposure-matched buy-and-hold
       benchmark, metrics: Sharpe, Sortino, average exposure, turnover,
@@ -537,6 +600,13 @@ Known issues:
    d. External data with immutable snapshots and 1-2 day lags: Coin Metrics
       MVRV (S8 cap) and hash rate (S9 entry filter).
    e. Survivor -> paper trading for >= 3 months (restart the paper account).
+      NEXT, owner decision: switch the paper account to "50% core + Daily
+      trend + MACD" (needs `ACTIVE_STRATEGY_ID` change + account reset) or keep
+      candidate 1. Ideas that respect the 0.80% fee: weekly decisions or a
+      wider band for S1/S2 (counts as new trials: log them).
+   f. Order flow (CVD, VWAP, order book) is being recorded from 22 Nov 2026
+      (`start_recorder.bat`); test it once there are months of it. Show CVD on
+      the chart when useful.
    Later (vision report): regime detection, volatility forecasting, prediction
    log with calibration, derivatives/on-chain layers if data allows.
 

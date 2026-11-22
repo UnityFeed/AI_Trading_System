@@ -95,3 +95,17 @@ with a 1-2 day delay, because on-chain numbers get revised.
   Optional, any time: keep the buy/sell side in the Kraken trades download,
   and start a small order-book recorder if the owner wants that data to
   exist in a few years.
+
+## Built and first tested (22 Nov 2026)
+
+Everything in A and B above was built the same day: graded exposure engine,
+S1-S6, S8, S9 and "50% core + Daily trend + MACD" in the registry (Strategy
+tester, chart, overview, paper trader), Coin Metrics download, metrics,
+Deflated Sharpe, PBO, trials ledger. From C: the Kraken trade side is kept
+and an order-book/order-flow recorder runs from now on.
+
+First result (cloud test database, 0.80% fee): the report's strategies trade
+too often for Kraken's fee and end at 3-24% of buy-and-hold's end value; the
+only one level with holding is 50% core + our Daily trend + MACD overlay.
+Numbers: CLAUDE.md, Status. Run `python -m scripts.run_strategy_research`
+on the real database to confirm.

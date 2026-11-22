@@ -15,10 +15,11 @@ Double-click **`start_app.bat`** in this folder. A browser tab opens:
 |---|---|
 | **Overview** | Your paper account vs buy-and-hold, what the strategy says today, the market in plain words (1d / 4h / 1h), how fresh your data is |
 | **Chart** | Candlesticks for the whole history (1h / 4h / 1d) with EMA, Bollinger, volume, RSI, MACD and ATR; trades of the paper account or of any strategy's backtest |
-| **Strategy tester** | Any strategy over 2013 to now: result per year, every trade, fee levels, optional margin simulation |
+| **Strategy tester** | All strategies compared side by side; any strategy over 2013 to now (or from any start year): result per year, every trade, Sharpe, break-even fee, fee levels, optional margin simulation |
 
 The button **Update data & run paper trader** downloads the newest candles
-and lets the paper trader act on them. Keep the black window open while you
+(and the free Coin Metrics MVRV and hash-rate data) and lets the paper
+trader act on them. Keep the black window open while you
 use the app; close it to stop.
 
 Quick status check without the app: `python main.py`.
@@ -39,6 +40,7 @@ library from the internet.
 
 ```
 start_app.bat           double-click to start the app
+start_recorder.bat      double-click to record Kraken's order book and buy/sell flow
 main.py                 quick status check
 src/
   data_collection/      exchange downloads (Kraken, Bitstamp, Coinbase) and the SQLite store
