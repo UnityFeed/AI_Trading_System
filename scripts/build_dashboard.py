@@ -14,9 +14,11 @@ from pathlib import Path
 
 from src.analysis.primary_history import get_continuous_history
 from src.app.routine import HISTORY_START
+from src.data_collection.external_data import ExternalDataStore
 from src.data_collection.market_data_repository import MarketDataRepository
 from src.paper_trading.store import PaperTradingStore
 from src.reporting.dashboard import gather, render
+from src.strategies.registry import active_strategy
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -36,7 +38,10 @@ def build(
         history = get_continuous_history(repository=repository, start=HISTORY_START, end=end)
 
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(render(gather(repository, history, store)), encoding="utf-8")
+    exposure = active_strategy().exposure
+    # External data is only read when the active strategy uses it.
+    external = ExternalDataStore().load_all() if exposure and exposure.needs_external else {}
+    output.write_text(render(gather(repository, history, store, external=external)), encoding="utf-8")
     return output
 
 

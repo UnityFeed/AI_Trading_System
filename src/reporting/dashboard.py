@@ -16,11 +16,13 @@ from datetime import datetime, timedelta, timezone
 
 from src.analysis.primary_history import ContinuousHistory
 from src.analysis.technical_indicators import IndicatorTable, indicator_tables
-from src.backtesting.conditions import evaluate_all
+from src.backtesting.exposure import MissingExternalData
 from src.backtesting.market import build_market
+from src.backtesting.report import strategy_state
 from src.data_collection.market_data_repository import MarketDataRepository
 from src.paper_trading.store import PaperTradingStore
-from src.paper_trading.trader import ACTIVE_STRATEGY, ACTIVE_TIMEFRAME, KILL_SWITCH
+from src.paper_trading.trader import ACTIVE_TIMEFRAME, KILL_SWITCH
+from src.strategies.registry import active_strategy
 
 
 # ---------------------------------------------------------------------------
@@ -150,8 +152,10 @@ def gather(
     store: PaperTradingStore,
     now: datetime | None = None,
     tables: dict[str, IndicatorTable] | None = None,
+    external: dict | None = None,
 ) -> DashboardData:
-    """`tables` (from indicator_tables) skips recomputing the indicators."""
+    """`tables` (from indicator_tables) skips recomputing the indicators;
+    `external`: daily external series, for strategies that use them."""
 
     now = now or datetime.now(timezone.utc)
     tables = tables or indicator_tables(history.candles)
@@ -165,17 +169,15 @@ def gather(
             daily_rows = rows
             daily_candles = candles
 
-    market = build_market(history, ACTIVE_TIMEFRAME, table=tables.get(ACTIVE_TIMEFRAME))
-    blocks = evaluate_all(market)
-    i = len(market.candles) - 1
-    spec = ACTIVE_STRATEGY
+    market = build_market(history, ACTIVE_TIMEFRAME, table=tables.get(ACTIVE_TIMEFRAME),
+                          external=external)
     rules = {}
-    if i >= 0:
-        rules = {
-            f"Trend filter: {spec.trend}": blocks["trend"][spec.trend][i],
-            f"Buy trigger: {spec.trigger}": blocks["trigger"][spec.trigger][i],
-            f"Sell rule: {spec.exit}": blocks["exit"][spec.exit][i],
-        }
+    if market.candles:
+        try:
+            state = strategy_state(market, active_strategy())
+            rules = {f"{r['role']}: {r['rule']}": bool(r["met"]) for r in state["rules"]}
+        except MissingExternalData as error:
+            rules = {f"External data missing ({error})": False}
 
     account = store.get_account()
     fills = store.fills()

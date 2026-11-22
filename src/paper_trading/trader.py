@@ -12,6 +12,10 @@ tradeable hour after the decision candle ends (normally 00:00 UTC the
 next day for daily candles), with Kraken fees and slippage. Hours filled
 in from another exchange, and Kraken's stale reopening hour, are skipped.
 
+Graded-exposure strategies (src/backtesting/exposure.py) work the same
+way, but a BUY or SELL moves the account to a target share of BTC
+(e.g. 67%), stored in the decision's snapshot, instead of all-in/all-out.
+
 Safety checks (they can block, never force, a trade):
 - stale data: if the newest hourly candle is older than MAX_DATA_AGE,
   nothing is processed until the data is updated;
@@ -27,6 +31,7 @@ from src.analysis.primary_history import ContinuousHistory
 from src.analysis.timeframes import TIMEFRAME_HOURS
 from src.backtesting.conditions import evaluate_all
 from src.backtesting.engine import CostSettings
+from src.backtesting.exposure import ExposureSpec, plan
 from src.backtesting.market import build_market, untradeable_hours
 from src.backtesting.search import StrategySpec
 from src.paper_trading.store import PROJECT_ROOT, PaperTradingStore
@@ -34,7 +39,7 @@ from src.strategies.registry import active_strategy
 
 
 # The strategy marked active in src/strategies/registry.py.
-ACTIVE_STRATEGY = active_strategy().spec
+ACTIVE_STRATEGY = active_strategy().exposure or active_strategy().spec
 ACTIVE_TIMEFRAME = active_strategy().timeframe
 STARTING_CASH = 10_000.0
 MAX_DATA_AGE = timedelta(hours=3)
@@ -46,6 +51,21 @@ class StepReport:
     decisions: list[str] = field(default_factory=list)
     fills: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+
+
+def exposure_snapshot(exposure_plan, row, i: int, target, weight) -> dict:
+    """What a graded strategy saw at candle i: its inputs and the target share."""
+    values = {k: (round(v, 4) if v is not None else None) for k, v in row.values.items()}
+    inputs = {
+        name: (round(v[i], 4) if isinstance(v[i], float) else v[i])
+        for name, v in exposure_plan.components.items()
+    }
+    return {
+        "indicators": values,
+        "inputs": inputs,
+        "target_exposure": target,
+        "weight_before": round(weight, 6),
+    }
 
 
 def condition_snapshot(blocks, spec: StrategySpec, row, i: int) -> dict:
@@ -67,16 +87,22 @@ class PaperTrader:
     def __init__(
         self,
         store: PaperTradingStore,
-        spec: StrategySpec = ACTIVE_STRATEGY,
+        spec: StrategySpec | ExposureSpec = ACTIVE_STRATEGY,
         timeframe: str = ACTIVE_TIMEFRAME,
         costs: CostSettings = CostSettings(),
         kill_switch: Path = KILL_SWITCH,
+        external: dict | None = None,
     ):
         self.store = store
         self.spec = spec
         self.timeframe = timeframe
         self.costs = costs
         self.kill_switch = kill_switch
+        self.external = external or {}
+
+    @property
+    def graded(self) -> bool:
+        return isinstance(self.spec, ExposureSpec)
 
     def ensure_account(self, start_candle: datetime, cash: float = STARTING_CASH):
         account = self.store.get_account()
@@ -110,8 +136,9 @@ class PaperTrader:
             )
             return report
 
-        market = build_market(history, self.timeframe)
-        blocks = evaluate_all(market)
+        market = build_market(history, self.timeframe, external=self.external)
+        blocks = None if self.graded else evaluate_all(market)
+        exposure_plan = plan(market, self.spec) if self.graded else None
         hourly = {c.timestamp: c for c in history.candles}
         blocked = untradeable_hours(history)
         period = timedelta(hours=TIMEFRAME_HOURS[self.timeframe])
@@ -140,8 +167,12 @@ class PaperTrader:
             if account.last_processed is not None:
                 try_fill(account.last_processed, candle.timestamp + period)
 
-            action, reason = self._decide(account, blocks, market, i)
-            snapshot = condition_snapshot(blocks, self.spec, market.rows[i], i)
+            if self.graded:
+                action, reason, target, weight = self._decide_share(account, exposure_plan, market, i)
+                snapshot = exposure_snapshot(exposure_plan, market.rows[i], i, target, weight)
+            else:
+                action, reason = self._decide(account, blocks, market, i)
+                snapshot = condition_snapshot(blocks, self.spec, market.rows[i], i)
             decision_id = self.store.add_decision(
                 candle.timestamp, action, reason, candle.close, snapshot
             )
@@ -153,7 +184,7 @@ class PaperTrader:
             if action in ("BUY", "SELL"):
                 updates["pending_side"] = action.lower()
                 updates["pending_decision_id"] = decision_id
-                if action == "BUY":
+                if action == "BUY" and not self.graded:
                     atr = market.rows[i].values.get("atr_14")
                     updates["stop_price"] = (
                         candle.close - self.spec.stop_atr * atr
@@ -193,7 +224,69 @@ class PaperTrader:
             return "SELL", spec.exit
         return "HOLD", "no sell rule triggered"
 
+    def _decide_share(self, account, exposure_plan, market, i: int):
+        """(action, reason, target share, current share) for a graded strategy."""
+        close = market.candles[i].close
+        equity = account.cash + account.btc * close
+        weight = account.btc * close / equity if equity > 0 else 0.0
+        target = exposure_plan.targets[i]
+
+        if account.pending_side:
+            return "PENDING", f"{account.pending_side} order still waiting for a tradeable open", target, weight
+        if target is None:
+            return "WAIT", "inputs not warmed up or external data missing", target, weight
+        band = self.spec.band
+        if abs(target - weight) < band - 1e-9 and not (target == 0.0 and account.btc > 0):
+            return "HOLD", f"BTC share {weight:.0%}, target {target:.0%}: change below {band:.1%}", target, weight
+        if target > weight:
+            if self.kill_switch.exists():
+                return "SKIP", "kill switch is on (database/STOP_PAPER_TRADING)", target, weight
+            return "BUY", f"raise the BTC share from {weight:.0%} to {target:.0%}", target, weight
+        return "SELL", f"lower the BTC share from {weight:.0%} to {target:.0%}", target, weight
+
+    def _fill_share(self, account, candle, report: StepReport) -> None:
+        """Move the account to the target share stored with the decision."""
+        fee_rate = self.costs.fee_pct / 100
+        slip = self.costs.slippage_pct / 100
+        decision = next(d for d in self.store.decisions() if d.id == account.pending_decision_id)
+        target = decision.snapshot["target_exposure"]
+        price = candle.open
+        equity = account.cash + account.btc * price
+        delta = target * equity - account.btc * price
+        cash, btc = account.cash, account.btc
+        if target == 0.0:
+            delta = -btc * price
+        if delta > 0:
+            spend = min(delta, cash)
+            fill = price * (1 + slip)
+            fee = spend * fee_rate
+            traded = (spend - fee) / fill
+            btc += traded
+            cash -= spend
+        else:
+            traded = min(-delta / price, btc)
+            fill = price * (1 - slip)
+            gross = traded * fill
+            fee = gross * fee_rate
+            cash += gross - fee
+            btc -= traded
+        self.store.update_account(
+            cash=cash, btc=btc, pending_side=None, pending_decision_id=None,
+            entry_price=None, stop_price=None,
+        )
+        self.store.add_fill(
+            account.pending_decision_id, candle.timestamp, account.pending_side,
+            fill, fee, traded, cash, btc,
+        )
+        share = btc * price / (cash + btc * price) if cash + btc * price > 0 else 0.0
+        report.fills.append(
+            f"{candle.timestamp:%Y-%m-%d %H:%M} {account.pending_side.upper()} "
+            f"{traded:.6f} BTC at {fill:,.2f} (fee {fee:,.2f} USD); BTC share now {share:.0%}"
+        )
+
     def _fill(self, account, candle, report: StepReport) -> None:
+        if self.graded:
+            return self._fill_share(account, candle, report)
         fee_rate = self.costs.fee_pct / 100
         slip = self.costs.slippage_pct / 100
 

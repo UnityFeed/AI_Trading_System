@@ -19,13 +19,47 @@ from src.backtesting.conditions import evaluate_all, strategy_signals
 from src.backtesting.engine import (
     NO_MARGIN, BacktestResult, CostSettings, MarginSettings, buy_and_hold, run_backtest,
 )
+from src.backtesting.exposure import (
+    VOTE_TEXT, ExposurePlan, fixed_mix, mvrv_cap, plan, run_exposure_backtest,
+)
 from src.backtesting.market import Market
+from src.backtesting.metrics import break_even_fee, risk_metrics
 from src.backtesting.walk_forward import summarize
 from src.strategies.registry import StrategyDefinition
 
 
 def signals(market: Market, definition: StrategyDefinition, blocks=None):
     return strategy_signals(blocks or evaluate_all(market), definition.spec)
+
+
+def prepare(market: Market, definition: StrategyDefinition):
+    """What a strategy decides at every close, computed once: (entry, exit)
+    signals for rules strategies, the target plan for exposure strategies."""
+    if definition.kind == "exposure":
+        return plan(market, definition.exposure)
+    return signals(market, definition)
+
+
+def run_strategy(
+    market: Market,
+    definition: StrategyDefinition,
+    window: range,
+    costs: CostSettings,
+    margin: MarginSettings = NO_MARGIN,
+    record_equity: bool = False,
+    prepared=None,
+) -> BacktestResult:
+    """One backtest of any registered strategy. Margin applies to rules strategies only."""
+    prepared = prepared if prepared is not None else prepare(market, definition)
+    if definition.kind == "exposure":
+        return run_exposure_backtest(
+            market, window, prepared.targets, definition.exposure.band, costs, record_equity
+        )
+    entry, exit_signal = prepared
+    return run_backtest(
+        market, window, entry, exit_signal, definition.spec.stop_atr, costs,
+        record_equity=record_equity, margin=margin,
+    )
 
 
 def daily_points(result: BacktestResult) -> list[list]:
@@ -57,6 +91,7 @@ def summary(result: BacktestResult) -> dict:
         "worst_trade_pct": round(min(returns), 2) if returns else None,
         "average_days_held": round(sum(held_days) / len(held_days), 1) if held_days else None,
         "exposure_pct": round(result.exposure_pct, 1),
+        "rebalances": len(result.rebalances),
         "liquidations": result.liquidations,
         # borrowing costs as % of the starting capital
         "margin_costs_pct": round(result.margin_costs * 100, 2),
@@ -92,14 +127,13 @@ def start_year_table(
     run starts with cash; indicators are already warmed up from the
     earlier history (they only use the past).
     """
-    entry, exit_signal = signals(market, definition)
+    prepared = prepare(market, definition)
     rows = []
     for year in start_years(market.candles[0].timestamp, market.candles[-1].timestamp):
         window = market.index_range(datetime(year, 1, 1, tzinfo=timezone.utc), END_OF_DATA)
         if len(window) < 2:
             continue
-        result = run_backtest(market, window, entry, exit_signal, definition.spec.stop_atr,
-                              costs, margin=margin)
+        result = run_strategy(market, definition, window, costs, margin, prepared=prepared)
         held = buy_and_hold(market, window, costs)
         rows.append({
             "year": year,
@@ -108,7 +142,7 @@ def start_year_table(
             "buy_hold_pct": round(held.total_return_pct, 2),
             "buy_hold_drop_pct": round(held.max_drawdown_pct, 2),
             "btc_vs_hold": round(btc_vs_hold(result, held), 3),
-            "trades": len(result.trades),
+            "trades": len(result.rebalances) if definition.kind == "exposure" else len(result.trades),
         })
     return rows
 
@@ -127,15 +161,18 @@ def strategy_report(
     window = range(len(market.candles)) if start is None else market.index_range(start, END_OF_DATA)
     if len(window) < 2:
         raise ValueError("Not enough data after the start date.")
-    entry, exit_signal = signals(market, definition)
-    result = run_backtest(
-        market, window, entry, exit_signal, definition.spec.stop_atr, costs,
-        record_equity=True, margin=margin,
-    )
+    exposure = definition.kind == "exposure"
+    if exposure:
+        margin = NO_MARGIN  # graded strategies never borrow
+    prepared = prepare(market, definition)
+    result = run_strategy(market, definition, window, costs, margin, record_equity=True, prepared=prepared)
     held = buy_and_hold(market, window, costs, record_equity=True)
 
     per_year_strategy = summarize(result).years
     per_year_held = summarize(held).years
+    rebalances_per_year: dict[int, int] = {}
+    for r in result.rebalances:
+        rebalances_per_year[r.time.year] = rebalances_per_year.get(r.time.year, 0) + 1
     years = []
     for year in sorted(per_year_held):
         s, h = per_year_strategy.get(year), per_year_held[year]
@@ -143,16 +180,27 @@ def strategy_report(
             "year": year,
             "strategy_pct": None if s is None else round(s.return_pct, 2),
             "strategy_drop_pct": None if s is None else round(s.max_drawdown_pct, 2),
-            "trades": 0 if s is None else s.trades,
+            "trades": rebalances_per_year.get(year, 0) if exposure else (0 if s is None else s.trades),
             "buy_hold_pct": round(h.return_pct, 2),
             "buy_hold_drop_pct": round(h.max_drawdown_pct, 2),
         })
 
+    # Exposure-matched benchmark: the fixed BTC/cash mix that holds the same
+    # average share of BTC. Did the timing add anything beyond holding less?
+    weight = max(0.0, min(1.0, result.exposure_pct / 100))
+    mix = fixed_mix(market, window, weight, costs) if weight > 0 else None
+    break_even = break_even_fee(
+        lambda c: run_strategy(market, definition, window, c, margin, prepared=prepared),
+        lambda c: buy_and_hold(market, window, c),
+        costs.slippage_pct,
+    )
+
     return {
+        "kind": definition.kind,
         "strategy": {
             "id": definition.id, "name": definition.name, "timeframe": definition.timeframe,
-            "rules": definition.spec.name, "description": definition.description,
-            "origin": definition.origin,
+            "rules": definition.rules_text, "description": definition.description,
+            "origin": definition.origin, "kind": definition.kind,
         },
         "costs": {"fee_pct": costs.fee_pct, "slippage_pct": costs.slippage_pct},
         "margin": {
@@ -166,6 +214,19 @@ def strategy_report(
         "start": None if start is None else start.date().isoformat(),
         "summary": {**summary(result), "btc_vs_hold": round(btc_vs_hold(result, held), 3)},
         "buy_and_hold": summary(held),
+        "metrics": {
+            **risk_metrics(result, held),
+            # fee per side at which the strategy would end level with holding
+            # (None: it does not beat holding even without fees)
+            "break_even_fee_pct": break_even,
+        },
+        "buy_and_hold_metrics": risk_metrics(held, held),
+        "exposure_matched": None if mix is None else {
+            "weight_pct": round(weight * 100, 1),
+            "total_return_pct": round(mix.total_return_pct, 2),
+            "max_drawdown_pct": round(mix.max_drawdown_pct, 2),
+            "strategy_vs_mix": round(result.final_equity / mix.final_equity, 3) if mix.final_equity > 0 else None,
+        },
         "by_start_year": start_year_table(market, definition, costs, margin),
         "years": years,
         "trades": [
@@ -178,6 +239,14 @@ def strategy_report(
                 "open": t.exit_reason == "end",
             }
             for t in result.trades
+        ],
+        "rebalances": [
+            {
+                "time": r.time.isoformat(), "price": round(r.price, 2),
+                "from_pct": round(r.from_weight * 100, 1), "to_pct": round(r.to_weight * 100, 1),
+                "traded_pct": round(r.traded * 100, 1),
+            }
+            for r in result.rebalances
         ],
         "equity": daily_points(result),
         "buy_and_hold_equity": daily_points(held),
@@ -195,6 +264,14 @@ def trade_markers_from_report(report: dict, timeframe: str) -> list[dict]:
     from src.analysis.timeframes import period_start
 
     markers = []
+    for r in report.get("rebalances", []):
+        when = datetime.fromisoformat(r["time"])
+        markers.append({
+            "time": int(period_start(when, timeframe).timestamp()),
+            "side": "buy" if r["to_pct"] > r["from_pct"] else "sell",
+            "price": r["price"],
+            "label": f"{r['to_pct']:.0f}%",
+        })
     for trade in report["trades"]:
         sides = [("buy", "entry_time", "entry_price")]
         if not trade["open"]:
@@ -222,6 +299,8 @@ def strategy_state(
     close (it would be carried out at the next open), and the last trades.
     """
 
+    if definition.kind == "exposure":
+        return exposure_state(market, definition, costs, recent)
     spec = definition.spec
     blocks = evaluate_all(market)
     entry, exit_signal = strategy_signals(blocks, spec)
@@ -282,6 +361,7 @@ def strategy_state(
         }
 
     return {
+        "kind": "rules",
         "strategy": {"id": definition.id, "name": definition.name, "timeframe": definition.timeframe,
                      "description": definition.description},
         "costs": {"fee_pct": costs.fee_pct, "slippage_pct": costs.slippage_pct},
@@ -294,4 +374,106 @@ def strategy_state(
         "last_closed_trade": trade_dict(closed[-1]) if closed else None,
         "recent_trades": [trade_dict(t) for t in reversed(closed[-recent:])],
         "trades_total": len(closed),
+    }
+
+
+def exposure_state(
+    market: Market,
+    definition: StrategyDefinition,
+    costs: CostSettings = CostSettings(),
+    recent: int = 5,
+) -> dict:
+    """
+    Where a graded-exposure strategy stands now: each input at the latest
+    close, the BTC share it holds and wants, and whether that difference is
+    big enough to trade at the next open.
+    """
+    spec = definition.exposure
+    prepared: ExposurePlan = plan(market, spec)
+    result = run_exposure_backtest(
+        market, range(len(market.candles)), prepared.targets, spec.band, costs
+    )
+    last_i = len(market.candles) - 1
+    last = market.candles[last_i]
+    period = timedelta(hours=TIMEFRAME_HOURS[market.timeframe])
+    parts = prepared.components
+
+    def flag(value):
+        return None if value is None else bool(value)
+
+    rules = []
+    if spec.fixed_weight is not None:
+        rules.append({"role": "Fixed share", "rule": f"{spec.fixed_weight:.0%} in BTC", "met": True})
+    if spec.core:
+        rules.append({"role": "Core", "rule": f"{spec.core:.0%} always held", "met": True})
+    for name in spec.votes:
+        rules.append({"role": "Vote", "rule": VOTE_TEXT.get(name, name), "met": flag(parts[name][last_i])})
+    if spec.vol_target_pct is not None:
+        vol = parts["volatility"][last_i]
+        cap = spec.vol_target_pct / 100
+        rules.append({
+            "role": "Volatility cap",
+            "rule": "not warmed up" if vol is None else
+                    f"yearly volatility {vol:.0%}: at most {min(1.0, cap / vol):.0%} of the share",
+            "met": None if vol is None else vol <= cap,
+        })
+    if spec.mvrv_cap:
+        z = parts["mvrv_z"][last_i]
+        rules.append({
+            "role": "MVRV cap",
+            "rule": "no recent MVRV data" if z is None else f"MVRV-Z {z:.2f}: at most {mvrv_cap(z):.0%} in BTC",
+            "met": None if z is None else z < 3,
+        })
+    if spec.hash_filter:
+        stress = parts["hash_stress"][last_i]
+        rules.append({
+            "role": "Hash-rate filter",
+            "rule": "no recent hash-rate data" if stress is None else
+                    ("miners under stress: no increases" if stress else "hash rate trend normal"),
+            "met": None if stress is None else not stress,
+        })
+
+    target = prepared.targets[last_i]
+    weight = result.end_weight or 0.0
+    signal = None
+    if result.pending_target is not None:
+        wanted = result.pending_target
+        signal = {
+            "action": "BUY" if wanted > weight else "SELL",
+            "reason": f"move the BTC share from {weight:.0%} to {wanted:.0%}",
+            "target_pct": round(wanted * 100, 1),
+        }
+
+    def rebalance_dict(r):
+        return {
+            "time": r.time.isoformat(), "price": round(r.price, 2),
+            "from_pct": round(r.from_weight * 100, 1), "to_pct": round(r.to_weight * 100, 1),
+            "traded_pct": round(r.traded * 100, 1),
+        }
+
+    since = result.rebalances[-1].time if result.rebalances else None
+    return {
+        "kind": "exposure",
+        "strategy": {"id": definition.id, "name": definition.name, "timeframe": definition.timeframe,
+                     "description": definition.description},
+        "costs": {"fee_pct": costs.fee_pct, "slippage_pct": costs.slippage_pct},
+        "candle_time": last.timestamp.isoformat(),
+        "close": last.close,
+        "next_close": (last.timestamp + 2 * period).isoformat(),
+        "rules": rules,
+        "exposure": {
+            "weight_pct": round(weight * 100, 1),
+            "target_pct": None if target is None else round(target * 100, 1),
+            "band_pct": round(spec.band * 100, 1),
+            "last_rebalance": since.isoformat() if since else None,
+            "days_since": None if since is None else
+                round((last.timestamp + period - since) / timedelta(days=1), 1),
+        },
+        "position": None,
+        "signal": signal,
+        "last_closed_trade": None,
+        "recent_trades": [],
+        "trades_total": 0,
+        "recent_rebalances": [rebalance_dict(r) for r in reversed(result.rebalances[-recent:])],
+        "rebalances_total": len(result.rebalances),
     }

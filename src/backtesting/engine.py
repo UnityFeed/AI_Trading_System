@@ -79,6 +79,18 @@ class Trade:
     exit_reason: str  # "signal", "stop", "end" or "liquidated"
 
 
+@dataclass(frozen=True)
+class Rebalance:
+    """One change of the BTC share by a graded-exposure strategy."""
+
+    time: datetime
+    price: float  # after slippage
+    from_weight: float  # share of the account in BTC just before (at the open)
+    to_weight: float  # share right after
+    traded: float  # value bought or sold, as a share of the account
+    fee: float  # fee paid, in starting-capital units
+
+
 @dataclass
 class BacktestResult:
     start: datetime
@@ -91,6 +103,17 @@ class BacktestResult:
     equity_curve: list[tuple[datetime, float]] = field(default_factory=list)
     margin_costs: float = 0.0  # opening + rollover fees paid, in starting-capital units
     liquidations: int = 0
+    # Graded-exposure runs only (src/backtesting/exposure.py):
+    rebalances: list[Rebalance] = field(default_factory=list)
+    end_weight: float | None = None  # BTC share at the last close (before the final sale)
+    pending_target: float | None = None  # decided at the last close, not filled yet
+
+    @property
+    def turnover(self) -> float:
+        """Value traded as a share of the account, summed (a full buy + sell = 2)."""
+        if self.rebalances:
+            return sum(r.traded for r in self.rebalances)
+        return 2.0 * len(self.trades)
 
     @property
     def total_return_pct(self) -> float:

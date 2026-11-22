@@ -53,7 +53,30 @@ PAGE_SCRIPT = r"""
   function load() {
     document.getElementById('chart-link').href = '/chart';
     fetch('/api/strategy-state?strategy=' + encodeURIComponent(select.value))
-      .then(function (r) { return r.json(); }).then(render);
+      .then(function (r) { return r.json(); }).then(function (s) {
+        if (s.error) {
+          var box = document.getElementById('latest-trade'); box.textContent = '';
+          box.appendChild(el('h2', 'Strategy')); box.appendChild(el('p', s.error, 'notice'));
+          return;
+        }
+        render(s);
+      });
+  }
+
+  function renderShare(s, box) {
+    var x = s.exposure;
+    var head = el('div', '', 'panel-head');
+    head.appendChild(el('h2', 'BTC share now')); head.appendChild(el('span', 'GRADED', 'pill strong'));
+    box.appendChild(head);
+    box.appendChild(el('div', x.weight_pct.toFixed(0) + '% in BTC', 'big-result'));
+    box.appendChild(el('p', 'the rest is cash; this strategy moves between 0% and 100% in steps instead of all-in/all-out', 'muted small'));
+    var grid = el('div', '', 'trade-grid');
+    grid.appendChild(stat('Target at the latest close', x.target_pct === null ? '-' : x.target_pct.toFixed(0) + '%',
+      'trades when it differs by ' + x.band_pct + ' points or more'));
+    grid.appendChild(stat('Latest close', money(s.close)));
+    grid.appendChild(stat('Last change', x.last_rebalance ? day(x.last_rebalance) : 'none', x.days_since === null ? '' : x.days_since + ' days ago'));
+    grid.appendChild(stat('Changes in total', String(s.rebalances_total)));
+    box.appendChild(grid);
   }
 
   function render(s) {
@@ -62,8 +85,10 @@ PAGE_SCRIPT = r"""
 
     // Latest trade
     var box = document.getElementById('latest-trade'); box.textContent = '';
-    var p = s.position, last = s.last_closed_trade;
-    if (p) {
+    var p = s.position, last = s.last_closed_trade, graded = s.kind === 'exposure';
+    if (graded) {
+      renderShare(s, box);
+    } else if (p) {
       var head = el('div', '', 'panel-head');
       head.appendChild(el('h2', 'Open trade')); head.appendChild(el('span', 'OPEN', 'pill strong'));
       box.appendChild(head);
@@ -96,7 +121,7 @@ PAGE_SCRIPT = r"""
     // Signal today
     var rules = document.getElementById('rules'); rules.textContent = '';
     s.rules.forEach(function (r) {
-      var li = el('li'); li.appendChild(badge(r.met, r.met ? 'yes' : 'no'));
+      var li = el('li'); li.appendChild(badge(r.met, r.met === null ? 'n/a' : (r.met ? 'yes' : 'no')));
       li.appendChild(el('span', r.role + ': ' + r.rule)); rules.appendChild(li);
     });
     document.getElementById('rules-when').textContent = 'at the close of the ' + st.timeframe + ' candle of ' + s.candle_time.slice(0, 16).replace('T', ' ') + ' UTC';
@@ -108,12 +133,25 @@ PAGE_SCRIPT = r"""
     } else {
       sig.className = 'signal-box';
       sig.appendChild(el('strong', 'No signal'));
-      sig.appendChild(el('div', (p ? 'Holding: the sell rule has not triggered.' : 'Waiting: not all buy rules are met.') +
+      sig.appendChild(el('div', (graded ? 'The BTC share stays as it is: the target is within the band.' :
+        (p ? 'Holding: the sell rule has not triggered.' : 'Waiting: not all buy rules are met.')) +
         ' Next decision at ' + s.next_close.slice(0, 16).replace('T', ' ') + ' UTC.', 'muted small'));
     }
 
-    // Recent trades
+    // Recent trades (or share changes)
     var t = document.getElementById('recent'); t.textContent = '';
+    document.getElementById('recent-title').textContent = graded ? 'Recent changes of the BTC share' : 'Recent trades';
+    if (graded) {
+      var gh = el('tr'); ['Date', 'Price', 'From', 'To'].forEach(function (h, i) { gh.appendChild(el('th', h, i ? 'num' : '')); });
+      t.appendChild(gh);
+      s.recent_rebalances.forEach(function (r) {
+        var tr = el('tr'); tr.appendChild(el('td', day(r.time))); tr.appendChild(el('td', money(r.price), 'num'));
+        tr.appendChild(el('td', r.from_pct.toFixed(0) + '%', 'num')); tr.appendChild(el('td', r.to_pct.toFixed(0) + '%', 'num'));
+        t.appendChild(tr);
+      });
+      document.getElementById('recent-count').textContent = s.rebalances_total + ' changes in total';
+      return;
+    }
     var hr = el('tr'); ['Bought', 'Sold', 'Days', 'Result', 'Why sold'].forEach(function (h, i) { hr.appendChild(el('th', h, i === 2 || i === 3 ? 'num' : '')); });
     t.appendChild(hr);
     s.recent_trades.forEach(function (x) {
@@ -154,7 +192,7 @@ def overview_page(history, exchanges, account, kill_switch_on: bool) -> str:
         "<div id='signal' class='signal-box'></div></section>")
     add("</div>")
 
-    add("<section class='panel'><div class='panel-head'><h2>Recent trades</h2>"
+    add("<section class='panel'><div class='panel-head'><h2 id='recent-title'>Recent trades</h2>"
         "<span class='muted small' id='recent-count'></span></div>"
         "<div class='table-scroll'><table class='compact' id='recent'></table></div>"
         "<div class='links' style='margin-top:10px'><a id='chart-link' href='/chart'>See every trade on the chart &rarr;</a>"

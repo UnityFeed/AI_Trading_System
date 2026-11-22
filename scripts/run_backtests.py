@@ -39,6 +39,8 @@ from src.backtesting.search import (
     rank_by_selection,
     search,
 )
+from src.backtesting.ledger import log_trials
+from src.backtesting.search import all_specs
 from src.data_collection.market_data_repository import MarketDataRepository
 
 
@@ -222,6 +224,15 @@ def main() -> None:
 
     for timeframe in args.timeframes:
         report_timeframe(history, timeframe, costs, f"{costs.fee_pct:g}")
+
+    # Trials ledger: these combinations count as tried (for the Deflated Sharpe Ratio).
+    log_trials([
+        {"script": "run_backtests", "timeframe": timeframe, "n_trials": len(all_specs()),
+          "fee_pct": costs.fee_pct, "slippage_pct": costs.slippage_pct,
+          "note": "strategy search: every combination, chosen on 2013-2021"}
+        for timeframe in args.timeframes
+    ])
+    print("Logged in the trials ledger (data/backtests/trials.csv).")
 
     print("Backtest complete. The database was only read.")
 

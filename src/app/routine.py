@@ -3,13 +3,17 @@ The daily routine, shared by the terminal command (scripts/daily_run.py)
 and the app's button:
 
 1. update the hourly candles of Kraken, Bitstamp and Coinbase
-2. let the paper trader process every new completed candle
+2. update the free external daily data (Coin Metrics: MVRV, market cap,
+   hash rate), when a store is given; a failure here is reported but does
+   not stop the routine
+3. let the paper trader process every new completed candle
 """
 
 from datetime import datetime, timezone
 
 from src.analysis.primary_history import ContinuousHistory, get_continuous_history
 from src.data_collection.exchange_updater import update_all_exchanges
+from src.data_collection.external_data import ExternalDataStore, update_external_data
 from src.data_collection.market_data_repository import MarketDataRepository
 from src.paper_trading.store import PaperTradingStore
 from src.paper_trading.trader import STARTING_CASH, PaperTrader
@@ -29,18 +33,29 @@ def daily_routine(
     update: bool = True,
     start: datetime | None = None,
     log=print,
+    external_store: ExternalDataStore | None = None,
 ) -> ContinuousHistory:
     """Run the routine and return the refreshed history."""
 
     if update:
-        log("STEP 1/2  Updating market data")
+        log("STEP 1/3  Updating market data")
         update_all_exchanges(repository, log=lambda *parts: log("  " + " ".join(map(str, parts))))
     else:
-        log("STEP 1/2  Skipped data update")
+        log("STEP 1/3  Skipped data update")
 
-    log("STEP 2/2  Paper trading")
+    if update and external_store is not None:
+        log("STEP 2/3  Updating external data (Coin Metrics)")
+        try:
+            update_external_data(external_store, log=lambda *parts: log(" ".join(map(str, parts))))
+        except Exception as error:  # needs internet; never blocks the paper trader
+            log(f"  WARNING: external data not updated: {error}")
+    else:
+        log("STEP 2/3  Skipped external data update")
+
+    log("STEP 3/3  Paper trading")
     history = load_history(repository)
-    trader = PaperTrader(store)
+    external = external_store.load_all() if external_store is not None else {}
+    trader = PaperTrader(store, external=external)
 
     if store.get_account() is None:
         now = datetime.now(timezone.utc)

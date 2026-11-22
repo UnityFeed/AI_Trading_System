@@ -21,6 +21,7 @@ from pathlib import Path
 
 from scripts.build_dashboard import build
 from src.app.routine import daily_routine
+from src.data_collection.external_data import ExternalDataStore
 from src.data_collection.market_data_repository import MarketDataRepository
 from src.paper_trading.store import PaperTradingStore
 
@@ -38,7 +39,8 @@ def main() -> None:
     store = PaperTradingStore(args.paper_db) if args.paper_db else PaperTradingStore()
     start = datetime.fromisoformat(args.start).replace(tzinfo=timezone.utc) if args.start else None
 
-    history = daily_routine(repository, store, update=not args.skip_update, start=start)
+    history = daily_routine(repository, store, update=not args.skip_update, start=start,
+                            external_store=ExternalDataStore())
 
     path = build(repository, store, history)
     print(f"Dashboard: {path}")

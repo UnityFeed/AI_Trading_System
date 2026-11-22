@@ -6,6 +6,7 @@ from pathlib import Path
 
 from src.analysis.primary_history import PRIMARY_LABEL, ContinuousHistory, SourceChange
 from src.backtesting.engine import CostSettings
+from src.backtesting.exposure import ExposureSpec
 from src.backtesting.search import StrategySpec
 from src.paper_trading.store import PaperTradingStore
 from src.paper_trading.trader import PaperTrader
@@ -156,6 +157,58 @@ class TestPaperTrader(unittest.TestCase):
 
         self.assertIn("rsi_14", decision.snapshot["indicators"])
         self.assertIn("trigger: rsi<30", decision.snapshot["rules"])
+
+
+
+class TestGradedPaperTrader(unittest.TestCase):
+    """A graded strategy moves the paper account to a target BTC share."""
+
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        folder = Path(self.temp_dir.name)
+        self.store = PaperTradingStore(folder / "paper.db")
+        self.kill_switch = folder / "STOP"
+        self.now = BASE_TIME + timedelta(hours=len(CLOSES))
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    def run_trader(self, spec, costs=NO_COSTS):
+        trader = PaperTrader(self.store, spec, "1h", costs, self.kill_switch)
+        trader.ensure_account(BASE_TIME, cash=1000.0)
+        return trader.step(make_history(), now=self.now)
+
+    def test_fixed_share_is_bought_once_then_held(self):
+
+        self.run_trader(ExposureSpec("60% fixed", fixed_weight=0.6, band=0.10),
+                        CostSettings(fee_pct=0.8, slippage_pct=0.05))
+
+        decisions = list(reversed(self.store.decisions()))  # oldest first
+        self.assertEqual(decisions[0].action, "BUY")
+        self.assertEqual(decisions[0].snapshot["target_exposure"], 0.6)
+        fills = self.store.fills()
+        self.assertEqual(len(fills), 1)
+        account = self.store.get_account()
+        price = make_history().candles[1].open
+        share = account.btc * price / (account.cash + account.btc * price)
+        self.assertAlmostEqual(share, 0.6, delta=0.01)
+        self.assertAlmostEqual(fills[0].fee, 600 * 0.008)
+        # The price runs from 200 to 222 and back: the share drifts, never by 10 points.
+        self.assertEqual({d.action for d in decisions[1:]}, {"HOLD"})
+
+    def test_votes_move_the_share_and_the_kill_switch_blocks_raising_it(self):
+
+        self.run_trader(ExposureSpec("vote", ("close>sma20",), core=0.0))
+        actions = [d.action for d in reversed(self.store.decisions())]
+        self.assertEqual(actions[:19], ["WAIT"] * 19)  # SMA 20 warming up
+        self.assertIn("BUY", actions)
+
+        self.store.reset_account()
+        self.kill_switch.write_text("stop")
+        self.run_trader(ExposureSpec("vote", ("close>sma20",), core=0.0))
+        actions = {d.action for d in self.store.decisions()}
+        self.assertIn("SKIP", actions)
+        self.assertNotIn("BUY", actions)
 
 
 if __name__ == "__main__":

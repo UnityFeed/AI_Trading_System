@@ -11,8 +11,11 @@ class KrakenTradesProvider:
     """
     Retrieves historical trades from Kraken.
 
-    Returns tuples containing:
-    (timestamp, price, volume)
+    fetch_trades returns tuples (timestamp, price, volume);
+    fetch_trades_with_side adds the side of the taker (the one who traded
+    at once against a waiting order): "b" = a buyer lifted an ask,
+    "s" = a seller hit a bid. Buy minus sell volume is the order flow
+    (CVD, cumulative volume delta).
     """
 
     exchange = "kraken"
@@ -25,6 +28,16 @@ class KrakenTradesProvider:
         start: datetime,
         end: datetime,
     ) -> list[tuple[datetime, float, float]]:
+        return [
+            (timestamp, price, volume)
+            for timestamp, price, volume, _ in self.fetch_trades_with_side(start, end)
+        ]
+
+    def fetch_trades_with_side(
+        self,
+        start: datetime,
+        end: datetime,
+    ) -> list[tuple[datetime, float, float, str]]:
 
         if (
             start.tzinfo is None
@@ -129,6 +142,7 @@ class KrakenTradesProvider:
                     timestamp,
                     float(row[0]),
                     float(row[1]),
+                    str(row[3]),
                 ))
 
             if reached_end:

@@ -4,7 +4,8 @@ from datetime import datetime, timezone
 
 from src.analysis.primary_history import PRIMARY_LABEL, ContinuousHistory
 from src.backtesting.conditions import EXITS, TREND_FILTERS, TRIGGERS, VOLUME_FILTERS
-from src.backtesting.engine import CostSettings, run_backtest
+from src.backtesting.engine import CostSettings, MarginSettings, run_backtest
+from src.backtesting.exposure import VOTE_TEXT, VOTES, ExposureSpec
 from src.backtesting.market import build_market
 from src.backtesting.report import (
     btc_vs_hold, signals, start_year_table, strategy_report, strategy_state, trade_markers_from_report,
@@ -21,12 +22,19 @@ class TestRegistry(unittest.TestCase):
     def test_every_strategy_uses_known_building_blocks(self):
         for s in STRATEGIES:
             with self.subTest(strategy=s.id):
+                self.assertIn(s.timeframe, ("1h", "4h", "1d"))
+                self.assertTrue(s.description and s.origin and s.rules_text)
+                if s.kind == "exposure":
+                    self.assertIsNone(s.spec)
+                    for vote in s.exposure.votes:
+                        self.assertIn(vote, VOTES)
+                        self.assertIn(vote, VOTE_TEXT)
+                    self.assertTrue(0 < s.exposure.band < 1)
+                    continue
                 self.assertIn(s.spec.trend, TREND_FILTERS)
                 self.assertIn(s.spec.trigger, TRIGGERS)
                 self.assertIn(s.spec.volume, VOLUME_FILTERS)
                 self.assertIn(s.spec.exit, EXITS)
-                self.assertIn(s.timeframe, ("1h", "4h", "1d"))
-                self.assertTrue(s.description and s.origin)
 
     def test_ids_are_unique_and_the_active_one_exists(self):
         ids = [s.id for s in STRATEGIES]
@@ -185,3 +193,53 @@ class TestStrategyState(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+GRADED = StrategyDefinition(
+    "test-graded", "Test graded", "1h", None, "test", "test",
+    exposure=ExposureSpec("50% core + close>sma20", ("close>sma20",), core=0.5),
+)
+
+
+class TestGradedStrategy(unittest.TestCase):
+
+    def setUp(self):
+        self.market = make_market()
+
+    def test_report_lists_share_changes_and_metrics(self):
+        report = strategy_report(self.market, GRADED, NO_COSTS)
+
+        self.assertEqual(report["kind"], "exposure")
+        self.assertEqual(report["trades"], [])
+        self.assertGreater(len(report["rebalances"]), 0)
+        self.assertEqual(report["summary"]["rebalances"], len(report["rebalances"]))
+        for key in ("sharpe", "sortino", "top20_capture_pct", "turnover_per_year", "break_even_fee_pct"):
+            self.assertIn(key, report["metrics"])
+        self.assertIsNotNone(report["exposure_matched"])
+        self.assertTrue(50 <= report["summary"]["exposure_pct"] <= 100)
+
+        markers = trade_markers_from_report(report, "1h")
+        self.assertEqual(len(markers), len(report["rebalances"]))
+        self.assertTrue(all(m["label"].endswith("%") for m in markers))
+
+    def test_margin_never_applies_to_graded_strategies(self):
+        plain = strategy_report(self.market, GRADED, NO_COSTS)
+        margin = strategy_report(self.market, GRADED, NO_COSTS, MarginSettings(leverage=3.0))
+        self.assertEqual(plain["summary"]["total_return_pct"], margin["summary"]["total_return_pct"])
+
+    def test_state_shows_the_share_and_its_inputs(self):
+        state = strategy_state(self.market, GRADED)
+
+        self.assertEqual(state["kind"], "exposure")
+        self.assertEqual([r["role"] for r in state["rules"]], ["Core", "Vote"])
+        self.assertIn(state["exposure"]["weight_pct"], (50.0, 100.0))
+        self.assertIsNone(state["position"])
+        self.assertEqual(state["rebalances_total"], len(strategy_report(self.market, GRADED, CostSettings())["rebalances"]))
+
+    def test_registered_graded_strategies_run(self):
+        for definition in STRATEGIES:
+            if definition.kind != "exposure" or definition.exposure.needs_external:
+                continue
+            with self.subTest(strategy=definition.id):
+                report = strategy_report(self.market, replace(definition, timeframe="1h"), NO_COSTS)
+                self.assertIn("summary", report)

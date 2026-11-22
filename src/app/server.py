@@ -8,6 +8,7 @@ not reachable from other machines) that serves
   /strategy      the strategy tester (full-history backtest)
   /api/chart     chart data in chunks (used by the chart page)
   /api/strategies, /api/backtest, /api/strategy-state   strategy data
+  /api/compare   key numbers of every strategy side by side
   /api/status    progress of a running job
   /api/run       POST: start the daily routine (update data + paper trader)
 
@@ -26,11 +27,13 @@ from src.app.chart_page import chart_page
 from src.app.overview_page import overview_page
 from src.app.strategy_page import strategy_page
 from src.backtesting.engine import CostSettings, MarginSettings
+from src.backtesting.exposure import MissingExternalData
 from src.backtesting.market import build_market
 from src.backtesting.report import start_years, strategy_report, strategy_state, trade_markers_from_report
 from src.strategies.registry import ACTIVE_STRATEGY_ID, STRATEGIES, get_strategy
 from src.analysis.technical_indicators import indicator_tables
 from src.app.routine import daily_routine, load_history
+from src.data_collection.external_data import ExternalDataStore
 from src.data_collection.market_data_repository import MarketDataRepository
 from src.paper_trading.store import PaperTradingStore
 from src.paper_trading.trader import KILL_SWITCH
@@ -45,9 +48,11 @@ MAX_CHUNK = 5000
 
 class AppState:
 
-    def __init__(self, repository: MarketDataRepository, store: PaperTradingStore):
+    def __init__(self, repository: MarketDataRepository, store: PaperTradingStore,
+                 external_store: ExternalDataStore | None = None):
         self.repository = repository
         self.store = store
+        self.external_store = external_store
         self.job_lock = threading.Lock()
         self.data_lock = threading.Lock()
         self.busy = False
@@ -63,7 +68,9 @@ class AppState:
         tables = indicator_tables(history.candles, TIMEFRAMES)
         series = {tf: build_series(history, tf, tables[tf]) for tf in TIMEFRAMES}
         exchanges = exchange_status(self.repository, datetime.now(timezone.utc))
+        external = self.external_store.load_all() if self.external_store else {}
         with self.data_lock:
+            self.external = external
             self.history = history
             self.series = series
             self.exchanges = exchanges
@@ -77,7 +84,7 @@ class AppState:
         market = self.markets.get(timeframe)
         if market is None:
             market = self.markets[timeframe] = build_market(
-                self.history, timeframe, table=self.tables.get(timeframe)
+                self.history, timeframe, table=self.tables.get(timeframe), external=self.external
             )
         return market
 
@@ -116,6 +123,31 @@ class AppState:
             self.reports[key] = report
             return report
 
+    def compare(self, fee_pct: float, start_year: int | None = None) -> dict:
+        """Key numbers of every strategy with the same fee and start (no margin)."""
+        rows, held = [], None
+        for definition in STRATEGIES:
+            try:
+                report = self.report(definition.id, fee_pct, 1.0, start_year)
+            except MissingExternalData as error:
+                rows.append({"id": definition.id, "name": definition.name, "error": str(error)})
+                continue
+            summary, metrics = report["summary"], report["metrics"]
+            starts = report["by_start_year"]
+            held = held or {**report["buy_and_hold"], **report["buy_and_hold_metrics"]}
+            rows.append({
+                "id": definition.id, "name": definition.name, "kind": definition.kind,
+                "total_return_pct": summary["total_return_pct"],
+                "btc_vs_hold": summary["btc_vs_hold"],
+                "max_drawdown_pct": summary["max_drawdown_pct"],
+                "sharpe": metrics["sharpe"],
+                "break_even_fee_pct": metrics["break_even_fee_pct"],
+                "exposure_pct": summary["exposure_pct"],
+                "start_years_ahead": sum(r["btc_vs_hold"] >= 1 for r in starts),
+                "start_years": len(starts),
+            })
+        return {"rows": rows, "buy_and_hold": held}
+
     # -- jobs ------------------------------------------------------------------
 
     def start_daily_routine(self, update: bool) -> bool:
@@ -132,7 +164,8 @@ class AppState:
 
     def _run(self, update: bool) -> None:
         try:
-            daily_routine(self.repository, self.store, update=update, log=self._write)
+            daily_routine(self.repository, self.store, update=update, log=self._write,
+                          external_store=self.external_store)
             self._write("Refreshing charts and overview...")
             self.reload()
             self._write("Done.")
@@ -175,6 +208,8 @@ def make_handler(state: AppState):
                     return self._json(state.state(query.get("strategy", [ACTIVE_STRATEGY_ID])[0]))
                 except KeyError:
                     return self._json({"error": "unknown strategy"}, 400)
+                except MissingExternalData as error:
+                    return self._json({"error": str(error)}, 409)
 
             if url.path == "/chart":
                 return self._send(200, chart_page(), "text/html; charset=utf-8")
@@ -189,8 +224,10 @@ def make_handler(state: AppState):
                     "leverages": LEVERAGES,
                     "start_years": state.start_years(),
                     "strategies": [
-                        {"id": s.id, "name": s.name, "timeframe": s.timeframe, "rules": s.spec.name,
-                         "description": s.description, "origin": s.origin}
+                        {"id": s.id, "name": s.name, "timeframe": s.timeframe, "rules": s.rules_text,
+                         "description": s.description, "origin": s.origin, "kind": s.kind,
+                         # graded strategies never borrow, so margin does not apply
+                         "supports_margin": s.kind == "rules"}
                         for s in STRATEGIES
                     ],
                 })
@@ -209,7 +246,21 @@ def make_handler(state: AppState):
                     return self._json({"error": f"fee must be one of {FEES}, leverage one of {LEVERAGES}"}, 400)
                 if start_year is not None and start_year not in state.start_years():
                     return self._json({"error": f"start must be 'all' or one of {state.start_years()}"}, 400)
-                return self._json(state.report(strategy_id, fee, leverage, start_year))
+                try:
+                    return self._json(state.report(strategy_id, fee, leverage, start_year))
+                except MissingExternalData as error:
+                    return self._json({"error": str(error)}, 409)
+
+            if url.path == "/api/compare":
+                try:
+                    fee = float(query.get("fee", [FEES[0]])[0])
+                    start_text = query.get("start", ["all"])[0]
+                    start_year = None if start_text == "all" else int(start_text)
+                except ValueError:
+                    return self._json({"error": "bad fee or start"}, 400)
+                if fee not in FEES or (start_year is not None and start_year not in state.start_years()):
+                    return self._json({"error": "unknown fee or start year"}, 400)
+                return self._json(state.compare(fee, start_year))
 
             if url.path == "/api/chart":
                 timeframe = query.get("tf", ["1d"])[0]
@@ -232,6 +283,8 @@ def make_handler(state: AppState):
                         report = state.report(source, FEES[0])
                     except KeyError:
                         return self._json({"error": "unknown strategy"}, 400)
+                    except MissingExternalData:
+                        report = {"trades": [], "rebalances": []}
                     payload["markers"] = trade_markers_from_report(report, timeframe)
                 return self._json(payload)
 

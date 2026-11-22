@@ -37,6 +37,7 @@ from src.backtesting.walk_forward import (
     summarize,
     walk_forward,
 )
+from src.backtesting.ledger import log_trials
 from src.data_collection.market_data_repository import MarketDataRepository
 
 
@@ -191,6 +192,15 @@ def main() -> None:
 
     for timeframe in args.timeframes:
         report_timeframe(history, timeframe, costs)
+
+    # Trials ledger: these combinations count as tried (for the Deflated Sharpe Ratio).
+    log_trials([
+        {"script": "run_walk_forward", "timeframe": timeframe, "n_trials": len(all_specs()),
+          "fee_pct": costs.fee_pct, "slippage_pct": costs.slippage_pct,
+          "note": "walk-forward: every combination over the full history"}
+        for timeframe in args.timeframes
+    ])
+    print("Logged in the trials ledger (data/backtests/trials.csv).")
 
     print("Test complete. The database was only read.")
 

@@ -209,8 +209,12 @@ CHART_SCRIPT = r"""
     var strip = document.getElementById('state'); strip.textContent = '';
     if (!state) return;
     function part(text, cls) { var e = document.createElement('span'); e.textContent = text; if (cls) e.className = cls; strip.appendChild(e); return e; }
-    var p = state.position;
-    if (p) {
+    var p = state.position, x = state.exposure;
+    if (state.kind === 'exposure' && x) {
+      part(x.weight_pct.toFixed(0) + '% IN BTC', 'pill strong');
+      part('target ' + (x.target_pct === null ? '-' : x.target_pct.toFixed(0) + '%') + ' · trades when the share changes by ' +
+           x.band_pct + ' points or more' + (x.last_rebalance ? ' · last change ' + x.last_rebalance.slice(0, 10) : ''));
+    } else if (p) {
       part('OPEN', 'pill strong');
       part('Bought ' + p.entry_time.slice(0, 10) + ' at $' + fmt(p.entry_price, 0) + ': ' + (p.result_if_sold_pct > 0 ? '+' : '') +
            p.result_if_sold_pct.toFixed(1) + '% if sold now' + (p.stop_price ? ' · stop $' + fmt(p.stop_price, 0) : ''));
@@ -222,10 +226,11 @@ CHART_SCRIPT = r"""
     state.rules.forEach(function (r) {
       var b = document.createElement('span'); b.className = 'badge ' + (r.met ? 'good' : 'neutral');
       var icon = document.createElement('span'); icon.className = 'badge-icon'; icon.setAttribute('aria-hidden', 'true');
-      icon.textContent = r.met ? '\u2713' : '\u2013';
+      icon.textContent = r.met === null ? '?' : (r.met ? '\u2713' : '\u2013');
       b.appendChild(icon); b.appendChild(document.createTextNode(r.role)); b.title = r.rule; strip.appendChild(b);
     });
-    if (state.signal) part(state.signal.action + ' SIGNAL at the next open', 'pill warn');
+    if (state.signal) part(state.signal.action + ' SIGNAL at the next open' +
+      (state.signal.target_pct !== undefined ? ' (to ' + state.signal.target_pct.toFixed(0) + '% BTC)' : ''), 'pill warn');
     part('as of the ' + state.strategy.timeframe + ' close of ' + state.candle_time.slice(0, 16).replace('T', ' ') + ' UTC', 'muted');
   }
 
@@ -368,8 +373,8 @@ CHART_SCRIPT = r"""
       var first = c.candles[0][0], ink = css('--text-primary');
       var marks = c.markers.filter(function (m) { return m.time >= first; }).map(function (m) {
         return m.side === 'buy'
-          ? {time: m.time, position: 'belowBar', shape: 'arrowUp', color: ink, text: 'B'}
-          : {time: m.time, position: 'aboveBar', shape: 'arrowDown', color: ink, text: 'S'};
+          ? {time: m.time, position: 'belowBar', shape: 'arrowUp', color: ink, text: m.label || 'B'}
+          : {time: m.time, position: 'aboveBar', shape: 'arrowDown', color: ink, text: m.label || 'S'};
       });
       if (state && state.signal) {
         var lastTime = c.candles[c.candles.length - 1][0];

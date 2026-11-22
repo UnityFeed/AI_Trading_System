@@ -185,6 +185,30 @@ class TestServer(unittest.TestCase):
         with self.assertRaises(HTTPError):
             self.get("/api/strategy-state?strategy=nope")
 
+    def test_compare_and_graded_strategies(self):
+
+        strategies = json.loads(self.get("/api/strategies")[1])["strategies"]
+        kinds = {s["id"]: s["kind"] for s in strategies}
+        self.assertIn("exposure", kinds.values())
+        graded = next(s for s in strategies if s["kind"] == "exposure" and s["id"] == "sma-ensemble-1d")
+        self.assertFalse(graded["supports_margin"])
+
+        compare = json.loads(self.get("/api/compare?fee=0.8&start=all")[1])
+        self.assertEqual(len(compare["rows"]), len(strategies))
+        by_id = {r["id"]: r for r in compare["rows"]}
+        # No external data in this test: those strategies say so instead of failing.
+        self.assertIn("error", by_id["sma-mvrv-1d"])
+        self.assertIn("sharpe", by_id["sma-ensemble-1d"])
+        self.assertIn("sharpe", compare["buy_and_hold"])
+
+        state = json.loads(self.get("/api/strategy-state?strategy=sma-ensemble-1d")[1])
+        self.assertEqual(state["kind"], "exposure")
+        with self.assertRaises(HTTPError) as missing:
+            self.get("/api/strategy-state?strategy=sma-mvrv-1d")
+        self.assertEqual(missing.exception.code, 409)
+        with self.assertRaises(HTTPError):
+            self.get("/api/compare?fee=0.1")
+
     def test_buttons_need_the_app_header(self):
 
         status, _ = self.post("/api/run?update=0")
@@ -202,7 +226,7 @@ class TestServer(unittest.TestCase):
                 break
             time.sleep(0.1)
         self.assertFalse(state["busy"])
-        self.assertIn("STEP 2/2  Paper trading", state["log"])
+        self.assertIn("STEP 3/3  Paper trading", state["log"])
         self.assertEqual(state["log"][-1], "Done.")
 
 

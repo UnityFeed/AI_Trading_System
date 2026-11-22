@@ -15,6 +15,7 @@ import webbrowser
 from pathlib import Path
 
 from src.app.server import AppState, serve
+from src.data_collection.external_data import ExternalDataStore
 from src.data_collection.market_data_repository import MarketDataRepository
 from src.paper_trading.store import PaperTradingStore
 
@@ -30,6 +31,7 @@ def main() -> None:
     parser.add_argument("--no-open", action="store_true", help="do not open the browser")
     parser.add_argument("--db", type=Path, default=None, help=argparse.SUPPRESS)
     parser.add_argument("--paper-db", type=Path, default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--external-db", type=Path, default=None, help=argparse.SUPPRESS)
     args = parser.parse_args()
 
     url = f"http://127.0.0.1:{args.port}/"
@@ -42,6 +44,7 @@ def main() -> None:
     state = AppState(
         MarketDataRepository(args.db) if args.db else MarketDataRepository(),
         PaperTradingStore(args.paper_db) if args.paper_db else PaperTradingStore(),
+        ExternalDataStore(args.external_db) if args.external_db else ExternalDataStore(),
     )
     server = serve(state, args.port)
     print(f"App running at {url}")

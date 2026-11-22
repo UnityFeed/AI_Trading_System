@@ -10,8 +10,8 @@ primary exchange really traded at that moment:
   Kraken's first trade after maintenance prints at a stale price.
 """
 
-from dataclasses import dataclass
-from datetime import datetime, timedelta
+from dataclasses import dataclass, field
+from datetime import date, datetime, timedelta
 
 from src.analysis.primary_history import ContinuousHistory
 from src.analysis.technical_indicators import (
@@ -31,6 +31,8 @@ class Market:
     rows: list[IndicatorRow]
     tradeable: list[bool]  # may an order fill at candles[i].open?
     consecutive: list[bool]  # is candles[i] exactly one period after candles[i-1]?
+    # Daily external series (src/data_collection/external_data.py), by name.
+    external: dict[str, dict[date, float]] = field(default_factory=dict)
 
     def index_range(self, start: datetime, end: datetime) -> range:
         """Indexes of candles with start <= timestamp < end."""
@@ -70,8 +72,10 @@ def build_market(
     timeframe: str,
     settings: IndicatorSettings = IndicatorSettings(),
     table: IndicatorTable | None = None,
+    external: dict[str, dict[date, float]] | None = None,
 ) -> Market:
-    """`table` (from indicator_table) skips recomputing the indicators."""
+    """`table` (from indicator_table) skips recomputing the indicators.
+    `external`: daily external series for strategies that use them."""
 
     candles, rows = table or indicator_table(history.candles, timeframe, settings)
     blocked = untradeable_hours(history)
@@ -83,4 +87,4 @@ def build_market(
         b.timestamp - a.timestamp == step for a, b in zip(candles, candles[1:])
     ]
 
-    return Market(timeframe, candles, rows, tradeable, consecutive)
+    return Market(timeframe, candles, rows, tradeable, consecutive, external or {})
