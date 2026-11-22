@@ -45,7 +45,9 @@ Run scripts as modules (`-m scripts.name`, no `.py`) because imports start with 
   strategy's backtest trades, open-trade buy/stop lines, a BUY/SELL signal
   marker and a status strip with the rules) and Strategy tester (full-history
   backtest: vs buy-and-hold, per year, every trade, 0.80%/0.40% fees, margin
-  Off/2x/3x/5x/10x). The button "Update data & run paper
+  Off/2x/3x/5x/10x, "Test from" full history or 1 Jan of any year, "BTC
+  compared with holding" ratio, and an "If you had started in..." table with
+  every start year). The button "Update data & run paper
   trader" does the daily routine. Keep the black window open; close it to stop.
 - Activate venv: `.venv\Scripts\Activate.ps1` (then `python` = venv python)
 - DAILY ROUTINE (update data, paper trade, rebuild dashboard):
@@ -235,6 +237,12 @@ open, high, low, close, volume. DB primary key:
   position value; Kraken does not say). Liquidation is checked on each
   candle's low; a gap below the liquidation price closes at the open.
   Buy-and-hold stays unleveraged in the comparison.
+- Judging a strategy for someone starting NOW (owner, 22 Nov 2026): the goal
+  is to end with more BTC than holding (sell before/into crashes, buy back
+  lower). Measure it as "BTC compared with holding" = strategy end value /
+  buy-and-hold end value over the same period. Never judge on one chosen start
+  year: always look at the whole "If you had started in..." table (every start
+  year to now) and prefer strategies that are ahead from most start years.
 - Strategy selection guards against overfitting: windows 2013-2016 (bitstamp
   era) and 2017-2021 (kraken era) are used to choose; a combination is ranked
   by its WEAKEST selection window (calmar = yearly return / max drop) and needs
@@ -399,6 +407,12 @@ liquidations, borrowing costs 1,716% of starting money); 3x -90% (6
 liquidations); 5x and 10x wiped out. Rollover 0.025% per 4 h is ~55% of the
 borrowed amount per year, which eats the extra gains of a strategy that holds
 for weeks to months; daily-candle lows of -30% liquidate 2x positions.
+Start-year view built 22 Nov 2026, 218 tests pass (test DB, 0.80% fee):
+candidate 1 is ahead of or level with holding from 10 of 13 start years
+(2014-2026); behind for starts near a bottom (2019 x0.71, 2023 x0.56, 2024
+x0.95), well ahead for starts near a top (2018 x1.39, 2022 x1.57, 2025 x1.18,
+2026 x1.40). It behaves like crash insurance: it pays off when the start is
+followed by a bear market.
 
 Step 0 results (owner ran on PC, 21 Nov 2026, data current to 2026-11-21 11:00 UTC;
 SQLite integrity ok, 0 duplicates, 0 invalid OHLCV, 0 non-aligned timestamps):

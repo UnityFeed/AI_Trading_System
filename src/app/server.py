@@ -27,7 +27,7 @@ from src.app.overview_page import overview_page
 from src.app.strategy_page import strategy_page
 from src.backtesting.engine import CostSettings, MarginSettings
 from src.backtesting.market import build_market
-from src.backtesting.report import strategy_report, strategy_state, trade_markers_from_report
+from src.backtesting.report import start_years, strategy_report, strategy_state, trade_markers_from_report
 from src.strategies.registry import ACTIVE_STRATEGY_ID, STRATEGIES, get_strategy
 from src.analysis.technical_indicators import indicator_tables
 from src.app.routine import daily_routine, load_history
@@ -94,16 +94,24 @@ class AppState:
             history, exchanges = self.history, self.exchanges
         return overview_page(history, exchanges, self.store.get_account(), KILL_SWITCH.exists())
 
-    def report(self, strategy_id: str, fee_pct: float, leverage: float = 1.0) -> dict:
-        """Full-history backtest report, cached until the next data reload."""
-        key = (strategy_id, fee_pct, leverage)
+    def start_years(self) -> list[int]:
+        """Years a test can start in: every full calendar year in the data."""
+        with self.data_lock:
+            candles = self.history.candles
+        return start_years(candles[0].timestamp, candles[-1].timestamp) if candles else []
+
+    def report(self, strategy_id: str, fee_pct: float, leverage: float = 1.0,
+               start_year: int | None = None) -> dict:
+        """Backtest report (full history or from 1 January of start_year), cached until the next reload."""
+        key = (strategy_id, fee_pct, leverage, start_year)
         with self.data_lock:
             if key in self.reports:
                 return self.reports[key]
             definition = get_strategy(strategy_id)
             market = self._market(definition.timeframe)
+            start = None if start_year is None else datetime(start_year, 1, 1, tzinfo=timezone.utc)
             report = strategy_report(
-                market, definition, CostSettings(fee_pct=fee_pct), MarginSettings(leverage=leverage)
+                market, definition, CostSettings(fee_pct=fee_pct), MarginSettings(leverage=leverage), start
             )
             self.reports[key] = report
             return report
@@ -179,6 +187,7 @@ def make_handler(state: AppState):
                     "active": ACTIVE_STRATEGY_ID,
                     "fees": FEES,
                     "leverages": LEVERAGES,
+                    "start_years": state.start_years(),
                     "strategies": [
                         {"id": s.id, "name": s.name, "timeframe": s.timeframe, "rules": s.spec.name,
                          "description": s.description, "origin": s.origin}
@@ -191,12 +200,16 @@ def make_handler(state: AppState):
                 try:
                     fee = float(query.get("fee", [FEES[0]])[0])
                     leverage = float(query.get("leverage", ["1"])[0])
+                    start_text = query.get("start", ["all"])[0]
+                    start_year = None if start_text == "all" else int(start_text)
                     get_strategy(strategy_id)
                 except (KeyError, ValueError):
                     return self._json({"error": "unknown strategy or bad fee"}, 400)
                 if fee not in FEES or leverage not in LEVERAGES:
                     return self._json({"error": f"fee must be one of {FEES}, leverage one of {LEVERAGES}"}, 400)
-                return self._json(state.report(strategy_id, fee, leverage))
+                if start_year is not None and start_year not in state.start_years():
+                    return self._json({"error": f"start must be 'all' or one of {state.start_years()}"}, 400)
+                return self._json(state.report(strategy_id, fee, leverage, start_year))
 
             if url.path == "/api/chart":
                 timeframe = query.get("tf", ["1d"])[0]

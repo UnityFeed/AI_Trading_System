@@ -159,7 +159,14 @@ class TestServer(unittest.TestCase):
         self.assertIn("markers", chart)
         self.assertEqual(json.loads(self.get("/api/chart?tf=1d&trades=none")[1])["markers"], [])
 
-        for bad in ("/api/backtest?strategy=nope", "/api/backtest?fee=0.1", "/api/chart?trades=nope"):
+        years = strategies["start_years"]
+        self.assertTrue(years)
+        from_year = json.loads(self.get(f"/api/backtest?strategy={strategies['active']}&start={years[-1]}")[1])
+        self.assertEqual(from_year["start"], f"{years[-1]}-01-01")
+        self.assertIn("by_start_year", from_year)
+
+        for bad in ("/api/backtest?strategy=nope", "/api/backtest?fee=0.1", "/api/chart?trades=nope",
+                    "/api/backtest?start=1999", "/api/backtest?start=abc"):
             with self.assertRaises(HTTPError):
                 self.get(bad)
 

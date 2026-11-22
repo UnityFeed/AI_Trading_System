@@ -6,7 +6,9 @@ from src.analysis.primary_history import PRIMARY_LABEL, ContinuousHistory
 from src.backtesting.conditions import EXITS, TREND_FILTERS, TRIGGERS, VOLUME_FILTERS
 from src.backtesting.engine import CostSettings, run_backtest
 from src.backtesting.market import build_market
-from src.backtesting.report import signals, strategy_report, strategy_state, trade_markers_from_report
+from src.backtesting.report import (
+    btc_vs_hold, signals, start_year_table, strategy_report, strategy_state, trade_markers_from_report,
+)
 from src.backtesting.search import StrategySpec
 from src.strategies.registry import (
     ACTIVE_STRATEGY_ID, STRATEGIES, StrategyDefinition, active_strategy, get_strategy,
@@ -85,6 +87,45 @@ class TestStrategyReport(unittest.TestCase):
         markers = trade_markers_from_report(report, "1d")
         self.assertEqual([m["side"] for m in markers], ["buy", "sell", "buy"])
         self.assertEqual(markers[0]["time"], int(datetime(2026, 1, 1, tzinfo=timezone.utc).timestamp()))
+
+
+class TestStartDate(unittest.TestCase):
+
+    def setUp(self):
+        self.market = make_market()  # 2025-12-30 .. 2026-01-04, hourly
+
+    def test_report_from_a_start_date_matches_a_run_on_that_window(self):
+        start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        report = strategy_report(self.market, DEFINITION, NO_COSTS, start=start)
+
+        window = self.market.index_range(start, datetime(9999, 1, 1, tzinfo=timezone.utc))
+        entry, exit_signal = signals(self.market, DEFINITION)
+        direct = run_backtest(self.market, window, entry, exit_signal, None, NO_COSTS)
+
+        self.assertEqual(report["start"], "2026-01-01")
+        self.assertEqual(report["summary"]["start"], start.isoformat())
+        self.assertAlmostEqual(report["summary"]["total_return_pct"], round(direct.total_return_pct, 2))
+        self.assertTrue(all(t["entry_time"] >= start.isoformat() for t in report["trades"]))
+
+    def test_btc_vs_hold_is_the_ratio_of_end_values(self):
+        start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        report = strategy_report(self.market, DEFINITION, NO_COSTS, start=start)
+        ratio = (1 + report["summary"]["total_return_pct"] / 100) / (1 + report["buy_and_hold"]["total_return_pct"] / 100)
+        self.assertAlmostEqual(report["summary"]["btc_vs_hold"], round(ratio, 3), places=2)
+
+    def test_start_year_table_has_one_row_per_full_year(self):
+        rows = start_year_table(self.market, DEFINITION, NO_COSTS)
+        self.assertEqual([r["year"] for r in rows], [2026])
+        self.assertIn("btc_vs_hold", rows[0])
+
+    def test_start_after_the_data_is_rejected(self):
+        with self.assertRaises(ValueError):
+            strategy_report(self.market, DEFINITION, NO_COSTS, start=datetime(2030, 1, 1, tzinfo=timezone.utc))
+
+    def test_btc_vs_hold_without_value(self):
+        empty = type("R", (), {"final_equity": 1.0})()
+        zero = type("R", (), {"final_equity": 0.0})()
+        self.assertEqual(btc_vs_hold(empty, zero), 0.0)
 
 
 def prefix(market, k):

@@ -22,6 +22,7 @@ body { height: auto; display: block; }
 #equity-chart { position: absolute; inset: 0; }
 td.num, th.num { text-align: right; }
 .scroll-y { max-height: 520px; overflow: auto; }
+tr.selected-row td { background: color-mix(in srgb, var(--series-1) 12%, transparent); font-weight: 600; }
 .scroll-y th { position: sticky; top: 0; background: var(--card); }
 """
 
@@ -31,6 +32,7 @@ PAGE_SCRIPT = r"""
   var params = new URLSearchParams(location.search);
   var strategySelect = document.getElementById('strategy'), feeSelect = document.getElementById('fee');
   var marginSelect = document.getElementById('margin');
+  var startSelect = document.getElementById('start');
   var chart = null, strategies = [];
 
   function css(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
@@ -57,6 +59,10 @@ PAGE_SCRIPT = r"""
       var o = el('option', f.toFixed(2) + '% per buy/sell' + (f === 0.8 ? ' (market orders)' : ' (limit orders)'));
       o.value = f; feeSelect.appendChild(o);
     });
+    var all = el('option', 'Full history'); all.value = 'all'; startSelect.appendChild(all);
+    d.start_years.slice().reverse().forEach(function (y) {
+      var o = el('option', 'From 1 Jan ' + y); o.value = String(y); startSelect.appendChild(o);
+    });
     d.leverages.forEach(function (lev) {
       var o = el('option', lev === 1 ? 'Off (no borrowing)' : lev + 'x (borrow ' + (lev - 1) + 'x your money)');
       o.value = lev; marginSelect.appendChild(o);
@@ -65,18 +71,20 @@ PAGE_SCRIPT = r"""
     choose(strategySelect, params.get('strategy') || SelectedStrategy.get() || d.active, d.active);
     choose(feeSelect, remembered('fee') || String(d.fees[0]), String(d.fees[0]));
     choose(marginSelect, remembered('margin') || '1', '1');
+    choose(startSelect, remembered('start') || 'all', 'all');
     load();
   });
   strategySelect.addEventListener('change', load);
   feeSelect.addEventListener('change', load);
   marginSelect.addEventListener('change', load);
+  startSelect.addEventListener('change', load);
 
   function load() {
     var id = strategySelect.value;
-    SelectedStrategy.set(id); remember('fee', feeSelect.value); remember('margin', marginSelect.value);
+    SelectedStrategy.set(id); remember('fee', feeSelect.value); remember('margin', marginSelect.value); remember('start', startSelect.value);
     history.replaceState(null, '', '/strategy?strategy=' + encodeURIComponent(id));
     document.getElementById('status').textContent = 'Running the backtest over the full history...';
-    fetch('/api/backtest?strategy=' + encodeURIComponent(id) + '&fee=' + feeSelect.value + '&leverage=' + marginSelect.value)
+    fetch('/api/backtest?strategy=' + encodeURIComponent(id) + '&fee=' + feeSelect.value + '&leverage=' + marginSelect.value + '&start=' + startSelect.value)
       .then(function (r) { return r.json(); }).then(render);
   }
 
@@ -105,6 +113,8 @@ PAGE_SCRIPT = r"""
     var rows = [
       ['Period', day(a.start) + ' to ' + day(a.end), ''],
       ['Total result', pct(a.total_return_pct), pct(b.total_return_pct)],
+      ['BTC compared with holding', '\u00d7' + a.btc_vs_hold.toFixed(2) + ' (' + (a.btc_vs_hold >= 1 ? '+' : '') +
+        ((a.btc_vs_hold - 1) * 100).toFixed(0) + '% BTC)', '\u00d71.00'],
       ['Per year (average)', pct(a.yearly_pct), pct(b.yearly_pct)],
       ['Worst drop from a peak', '-' + a.max_drawdown_pct.toFixed(1) + '%', '-' + b.max_drawdown_pct.toFixed(1) + '%'],
       ['Return per unit of risk (yearly / worst drop)', a.calmar.toFixed(2), b.calmar.toFixed(2)],
@@ -152,6 +162,32 @@ PAGE_SCRIPT = r"""
       requestAnimationFrame(function () { chart.timeScale().fitContent(); });
       setTimeout(function () { chart.timeScale().fitContent(); }, 150);
     }
+
+    // If you had started in...
+    var sy = document.getElementById('start-years'); sy.textContent = '';
+    var sh = el('tr');
+    ['Start', 'Strategy', 'Holding', 'BTC vs holding', 'Strategy worst drop', 'Holding worst drop', 'Trades', 'Ahead of holding?']
+      .forEach(function (h, i) { sh.appendChild(el('th', h, i ? 'num' : '')); });
+    sy.appendChild(sh);
+    var ahead = 0;
+    rep.by_start_year.slice().reverse().forEach(function (r) {
+      var tr = el('tr');
+      if (rep.start && rep.start.slice(0, 4) === String(r.year)) tr.className = 'selected-row';
+      tr.appendChild(el('td', '1 Jan ' + r.year));
+      tr.appendChild(el('td', pct(r.strategy_pct), 'num'));
+      tr.appendChild(el('td', pct(r.buy_hold_pct), 'num'));
+      tr.appendChild(el('td', '\u00d7' + r.btc_vs_hold.toFixed(2), 'num'));
+      tr.appendChild(el('td', drop(r.strategy_drop_pct), 'num'));
+      tr.appendChild(el('td', drop(r.buy_hold_drop_pct), 'num'));
+      tr.appendChild(el('td', String(r.trades), 'num'));
+      var win = r.btc_vs_hold >= 1; if (win) ahead++;
+      var cell = el('td', '', 'num'), b = el('span', '', 'badge ' + (win ? 'good' : 'neutral'));
+      var ic = el('span', win ? '\u2713' : '\u2013', 'badge-icon'); ic.setAttribute('aria-hidden', 'true');
+      b.appendChild(ic); b.appendChild(document.createTextNode(win ? 'yes' : 'no')); cell.appendChild(b);
+      tr.appendChild(cell); sy.appendChild(tr);
+    });
+    document.getElementById('start-years-summary').textContent =
+      'Ahead of (or level with) holding from ' + ahead + ' of ' + rep.by_start_year.length + ' start years.';
 
     // Per year
     var years = document.getElementById('years'); years.textContent = '';
@@ -209,12 +245,13 @@ def strategy_page() -> str:
         "BTC Trading - Strategy tester",
         nav_html("strategy")
         + "<main><header class='page-head'><div><h1>Strategy tester</h1>"
-        "<p class='muted'>Every strategy in the list, tested over the full history (2013 to now) with Kraken's fees, "
-        "next-candle fills and no trades on hours filled in from another exchange.</p></div></header>"
+        "<p class='muted'>Every strategy in the list, tested over the full history (2013 to now) or from any start year, "
+        "with Kraken's fees, next-candle fills and no trades on hours filled in from another exchange.</p></div></header>"
         "<section class='panel'><div class='controls'>"
         "<label>Strategy <select id='strategy'></select></label>"
         "<label>Fees <select id='fee'></select></label>"
         "<label>Margin <select id='margin'></select></label>"
+        "<label>Test from <select id='start'></select></label>"
         "<a id='show-on-chart' href='/chart'>Show these trades on the chart &rarr;</a>"
         "<span class='muted' id='status'></span></div>"
         "<p id='description'></p><p class='secondary small' id='rules'></p><p class='muted small' id='origin'></p>"
@@ -226,6 +263,11 @@ def strategy_page() -> str:
         "<div class='legend'><span class='legend-item'><span class='legend-key' style='background:var(--series-1)'></span>Strategy</span>"
         "<span class='legend-item'><span class='legend-key' style='background:var(--series-2)'></span>Buy and hold</span></div>"
         "<div id='equity'><div id='equity-chart'></div></div></section>"
+        "<section class='panel'><div class='panel-head'><h2>If you had started in&hellip;</h2>"
+        "<span class='secondary small' id='start-years-summary'></span></div>"
+        "<p class='muted small' style='margin-top:0'>Each row starts with cash on 1 January of that year and runs to now. "
+        "&times;1.20 means you would end with 1.2 BTC for every 1 BTC you would have by simply holding.</p>"
+        "<div class='table-scroll'><table class='compact' id='start-years'></table></div></section>"
         "<section class='panel'><div class='panel-head'><h2>Year by year</h2><span class='secondary small' id='years-summary'></span></div>"
         "<div class='table-scroll'><table class='compact' id='years'></table></div></section>"
         "<section class='panel'><div class='panel-head'><h2>Every trade</h2><span class='muted small'>newest first</span></div>"

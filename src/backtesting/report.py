@@ -12,7 +12,7 @@ used to choose the strategy, so this view is optimistic. The walk-forward
 (scripts/run_walk_forward.py) is the stricter test.
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from src.analysis.timeframes import TIMEFRAME_HOURS
 from src.backtesting.conditions import evaluate_all, strategy_signals
@@ -63,19 +63,76 @@ def summary(result: BacktestResult) -> dict:
     }
 
 
+def btc_vs_hold(result: BacktestResult, held: BacktestResult) -> float:
+    """
+    BTC you end with for every 1 BTC you would have by simply holding over
+    the same period (both valued at the same final price, so this is the
+    ratio of the two end values).
+    """
+    return result.final_equity / held.final_equity if held.final_equity > 0 else 0.0
+
+
+def start_years(first: datetime, last: datetime) -> list[int]:
+    """Years whose 1 January lies inside the data: possible test start dates."""
+    return [
+        year for year in range(first.year, last.year + 1)
+        if first <= datetime(year, 1, 1, tzinfo=timezone.utc) <= last
+    ]
+
+
+def start_year_table(
+    market: Market,
+    definition: StrategyDefinition,
+    costs: CostSettings,
+    margin: MarginSettings = NO_MARGIN,
+) -> list[dict]:
+    """
+    "If you had started on 1 January of year Y": the strategy and
+    buy-and-hold from that day to now, for every year in the data. Each
+    run starts with cash; indicators are already warmed up from the
+    earlier history (they only use the past).
+    """
+    entry, exit_signal = signals(market, definition)
+    rows = []
+    for year in start_years(market.candles[0].timestamp, market.candles[-1].timestamp):
+        window = market.index_range(datetime(year, 1, 1, tzinfo=timezone.utc), END_OF_DATA)
+        if len(window) < 2:
+            continue
+        result = run_backtest(market, window, entry, exit_signal, definition.spec.stop_atr,
+                              costs, margin=margin)
+        held = buy_and_hold(market, window, costs)
+        rows.append({
+            "year": year,
+            "strategy_pct": round(result.total_return_pct, 2),
+            "strategy_drop_pct": round(result.max_drawdown_pct, 2),
+            "buy_hold_pct": round(held.total_return_pct, 2),
+            "buy_hold_drop_pct": round(held.max_drawdown_pct, 2),
+            "btc_vs_hold": round(btc_vs_hold(result, held), 3),
+            "trades": len(result.trades),
+        })
+    return rows
+
+
+END_OF_DATA = datetime(9999, 1, 1, tzinfo=timezone.utc)
+
+
 def strategy_report(
     market: Market,
     definition: StrategyDefinition,
     costs: CostSettings,
     margin: MarginSettings = NO_MARGIN,
+    start: datetime | None = None,
 ) -> dict:
-    full = range(len(market.candles))
+    """`start`: test from this day on (None = the full history)."""
+    window = range(len(market.candles)) if start is None else market.index_range(start, END_OF_DATA)
+    if len(window) < 2:
+        raise ValueError("Not enough data after the start date.")
     entry, exit_signal = signals(market, definition)
     result = run_backtest(
-        market, full, entry, exit_signal, definition.spec.stop_atr, costs,
+        market, window, entry, exit_signal, definition.spec.stop_atr, costs,
         record_equity=True, margin=margin,
     )
-    held = buy_and_hold(market, full, costs, record_equity=True)
+    held = buy_and_hold(market, window, costs, record_equity=True)
 
     per_year_strategy = summarize(result).years
     per_year_held = summarize(held).years
@@ -106,8 +163,10 @@ def strategy_report(
             "liquidation_level_pct": margin.liquidation_level_pct,
             "liquidation_fee_pct": margin.liquidation_fee_pct,
         },
-        "summary": summary(result),
+        "start": None if start is None else start.date().isoformat(),
+        "summary": {**summary(result), "btc_vs_hold": round(btc_vs_hold(result, held), 3)},
         "buy_and_hold": summary(held),
+        "by_start_year": start_year_table(market, definition, costs, margin),
         "years": years,
         "trades": [
             {
@@ -123,8 +182,9 @@ def strategy_report(
         "equity": daily_points(result),
         "buy_and_hold_equity": daily_points(held),
         "note": (
-            "This test covers every year, including the years used to choose the strategy, "
-            "so it is optimistic. The walk-forward test is stricter."
+            "These results include years that were used to choose this strategy, so they "
+            "are optimistic. The walk-forward test is stricter, and forward paper trading "
+            "is the only clean test."
         ),
         "generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
     }
