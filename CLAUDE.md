@@ -103,6 +103,20 @@ Run scripts as modules (`-m scripts.name`, no `.py`) because imports start with 
   `start_recorder.bat` or `python -m scripts.record_order_flow` (`--once`,
   first run `--days 30`) -> `database/order_flow.db`
 
+## Branch `predictive-engine` (owner, 22 Nov 2026)
+Separate branch for the Predictive Market Structure & Scenario Engine (owner's
+blueprint `docs/predictive_engine/2026-11-22_blueprint_predictive_market_structure.md`,
+gated plan `docs/predictive_engine/PLAN.md`). Owner's end goal: scenarios with
+their probabilities, targets and invalidation levels drawn on the chart, every
+forecast stored and scored. The owner keeps running the daily routine / paper
+accounts from the main working branch (`ccr-11be14d2-h9cw29`), not from this
+one (both branches share the same database files). The engine only reads
+market data and never touches the paper-trading files; its forecasts go to
+their own `database/predictions.db` (phase 4).
+- Market structure (phase 1): `python -m scripts.run_market_structure`
+  (`--left 5 --right 5` for bigger swings): trend, last swing high/low,
+  labelled swings, BOS/CHoCH/sweeps on 1w/1d/4h.
+
 ## Architecture (keep it; do not redesign without a clear reason)
 - `src/data_collection/`: `MarketData` dataclass, `data_validator`, `MarketDataProvider`
   interface, `MarketDataService` (one provider at a time), `MarketDataRepository`
@@ -192,6 +206,10 @@ Run scripts as modules (`-m scripts.name`, no `.py`) because imports start with 
   single/family/top10, `lab_vote`: registry votes named
   `lab:FILTER|TRIGGER|EXIT|TRAIL`), `models.py` (logistic regression, analog
   kNN, point-in-time labels, walk-forward predictions, `score`)
+- `src/predictive_engine/` (branch `predictive-engine`): `structure.py`
+  (`raw_pivots`: pivot highs/lows confirmed `right` candles later;
+  `analyse`: alternating labelled swings HH/LH/HL/LL, trend per candle,
+  BOS/CHoCH/sweep events; all causal, truncation-tested)
 - `src/risk_management/`, `src/execution/`: empty packages (not started)
 - `scripts/`: update, integrity, comparison, anomaly, research and app tools;
   `scripts/archive/` holds finished one-time jobs (initial imports incl. the
