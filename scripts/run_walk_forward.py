@@ -14,8 +14,8 @@ B. Walk-forward: for every year from 2016 on, pick the combination that
 The database is only read.
 
 Usage:
-    python -m scripts.run_walk_forward                  (fee 0.80%, 1d 4h 1h)
-    python -m scripts.run_walk_forward --fee 0.40
+    python -m scripts.run_walk_forward                  (fee 0.25% Bybit EU, 1d 4h 1h)
+    python -m scripts.run_walk_forward --fee 0.80
     python -m scripts.run_walk_forward --timeframes 1d
 """
 

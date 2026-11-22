@@ -59,7 +59,8 @@ PAGE_SCRIPT = r"""
       o.value = s.id; strategySelect.appendChild(o);
     });
     d.fees.forEach(function (f) {
-      var o = el('option', f.toFixed(2) + '% per buy/sell' + (f === 0.8 ? ' (market orders)' : ' (limit orders)'));
+      var label = (d.fee_labels || {})[String(f)];
+      var o = el('option', f.toFixed(2) + '% per buy/sell' + (label ? ' (' + label + ')' : ''));
       o.value = f; feeSelect.appendChild(o);
     });
     var all = el('option', 'Full history'); all.value = 'all'; startSelect.appendChild(all);
@@ -72,7 +73,7 @@ PAGE_SCRIPT = r"""
     });
     // A link (?strategy=...) wins; otherwise the last choice; otherwise the active strategy.
     choose(strategySelect, params.get('strategy') || SelectedStrategy.get() || d.active, d.active);
-    choose(feeSelect, remembered('fee') || String(d.fees[0]), String(d.fees[0]));
+    choose(feeSelect, remembered('fee-v2') || String(d.fees[0]), String(d.fees[0]));
     choose(marginSelect, remembered('margin') || '1', '1');
     choose(startSelect, remembered('start') || 'all', 'all');
     load(); compare();
@@ -92,7 +93,7 @@ PAGE_SCRIPT = r"""
     var graded = info(id).supports_margin === false;
     marginSelect.disabled = graded;
     var leverage = graded ? '1' : marginSelect.value;
-    SelectedStrategy.set(id); remember('fee', feeSelect.value); remember('margin', marginSelect.value); remember('start', startSelect.value);
+    SelectedStrategy.set(id); remember('fee-v2', feeSelect.value); remember('margin', marginSelect.value); remember('start', startSelect.value);
     history.replaceState(null, '', '/strategy?strategy=' + encodeURIComponent(id));
     document.getElementById('status').textContent = 'Running the backtest over the full history...';
     fetch('/api/backtest?strategy=' + encodeURIComponent(id) + '&fee=' + feeSelect.value + '&leverage=' + leverage + '&start=' + startSelect.value)
@@ -324,7 +325,7 @@ def strategy_page() -> str:
         nav_html("strategy")
         + "<main><header class='page-head'><div><h1>Strategy tester</h1>"
         "<p class='muted'>Every strategy in the list, tested over the full history (2013 to now) or from any start year, "
-        "with Kraken's fees, next-candle fills and no trades on hours filled in from another exchange.</p></div></header>"
+        "with your exchange's fees (Bybit EU by default), next-candle fills and no trades on hours filled in from another exchange.</p></div></header>"
         "<section class='panel'><div class='controls'>"
         "<label>Strategy <select id='strategy'></select></label>"
         "<label>Fees <select id='fee'></select></label>"

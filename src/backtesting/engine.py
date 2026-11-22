@@ -34,7 +34,10 @@ HOURS_PER_YEAR = 365.25 * 24
 
 @dataclass(frozen=True)
 class CostSettings:
-    fee_pct: float = 0.80  # Kraken Pro taker fee, lowest tier (checked 21 Nov 2026)
+    # Owner's exchange: Bybit EU, spot, VIP 0 (< EUR 100,000 balance and 30-day
+    # volume), same rate for maker and taker (bybit.eu fee page, read 22 Nov 2026).
+    # Kraken Pro lowest tier for comparison: 0.80% taker / 0.40% maker.
+    fee_pct: float = 0.25
     slippage_pct: float = 0.05  # assumption for BTC/USD market orders
 
 

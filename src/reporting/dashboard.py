@@ -570,7 +570,7 @@ def render(data: DashboardData, nav_html: str = "") -> str:
                 ],
             ))
         add("<p class='muted small'>Decisions at each daily close (00:00 UTC); orders fill at the next tradeable open "
-            "with Kraken's 0.80% fee and 0.05% slippage. "
+            "with your Bybit EU fee (0.25%) and 0.05% slippage. "
             f"Account created {account.created_at:%Y-%m-%d}; earlier days were replayed from history.</p></section>")
 
     # -- Strategy today + latest decisions -----------------------------------------
@@ -656,7 +656,7 @@ def render(data: DashboardData, nav_html: str = "") -> str:
         + ("<a class='small' href='/strategy'>Strategy tester &rarr;</a>" if in_app else "")
         + "</div><ul class='secondary tight'>"
         "<li>540 indicator combinations tested on 1h, 4h and 1d, chosen on older years and checked on years "
-        "they were not chosen on, after Kraken fees.</li>"
+        "they were not chosen on, after real trading fees.</li>"
         "<li><strong>Daily trend following</strong> cut the worst drop from 84% to about 52% but made about a "
         "quarter of buy-and-hold's return (2016-now).</li>"
         "<li>Hourly and 4-hour strategies did not survive the fees. Margin made results worse.</li></ul></section>")

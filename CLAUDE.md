@@ -44,7 +44,7 @@ Run scripts as modules (`-m scripts.name`, no `.py`) because imports start with 
   chart for everything: full history 1h/4h/1d, indicators, the selected
   strategy's backtest trades, open-trade buy/stop lines, a BUY/SELL signal
   marker and a status strip with the rules) and Strategy tester (full-history
-  backtest: vs buy-and-hold, per year, every trade, 0.80%/0.40% fees, margin
+  backtest: vs buy-and-hold, per year, every trade, 0.25% Bybit EU / 0.80% / 0.40% Kraken fees, margin
   Off/2x/3x/5x/10x, "Test from" full history or 1 Jan of any year, "BTC
   compared with holding" ratio, and an "If you had started in..." table with
   every start year; an "All strategies compared" table at the top; Sharpe,
@@ -254,10 +254,16 @@ open, high, low, close, volume. DB primary key:
   afterwards. Evaluate with Brier score, log loss and calibration, not accuracy alone.
 - Signals use completed candles only. Backtests must fill no earlier than the
   next candle, with fees and slippage. Avoid look-ahead bias.
-- Backtest costs: default fee 0.80% per side = Kraken Pro taker fee, lowest
-  tier ($0+), from kraken.com/pro/fees, checked 21 Nov 2026 (maker 0.40%;
-  $2.5K+: 0.30/0.60; $10K+: 0.22/0.38; Buy Crypto app ~1% + spread). Slippage
-  0.05% per side is an assumption. Long-only, all-in/all-out, no leverage by
+- Backtest costs (owner, 22 Nov 2026: "I have my BTC on Bybit EU, under 100k,
+  ~3.5k invested"): default fee 0.25% per side = Bybit EU spot VIP 0 (asset
+  balance and 30-day volume < EUR 100,000; same rate for maker and taker), from
+  bybit.eu/en-EU/help-center/article/Trading-Fee-Structure, read 22 Nov 2026
+  (0.22% from EUR 100k volume, 0.20% 250k, 0.15% 500k; VIP 1 0.12%). Bybit
+  global (bybit.com) is 0.10% but does not apply to the owner. The exact rate
+  is on the owner's Bybit "My Fee Rate" page. Kraken Pro stays selectable for
+  comparison: 0.80% taker / 0.40% maker at the lowest tier (kraken.com/pro/fees,
+  21 Nov 2026). Price history stays Kraken BTC/USD (Bybit trades BTC/USDT or
+  BTC/EUR; typical difference ~0.1%). Slippage 0.05% per side is an assumption. Long-only, all-in/all-out, no leverage by
   default.
 - Margin is a SIMULATION toggle only (owner request 21 Nov 2026; the owner does
   not trade on margin): `MarginSettings` in `engine.py`, Strategy tester
@@ -309,8 +315,8 @@ Two reports in `docs/research/` (read them before strategy work):
   a 0.80% fee. Kraken public trades include the buy/sell side (CVD
   possible; `kraken_trades_provider` currently drops it).
 Where the reports conflict with this project, the project wins:
-- Fees: reports assume 0.10-0.26%; the owner's real Kraken fee is 0.80%
-  (0.40% maker). Favour low-turnover designs; always report break-even cost.
+- Fees: reports assume 0.10-0.26%; the owner's real fee is Bybit EU 0.25%
+  (Kraken 0.80% taker / 0.40% maker for comparison). Favour low-turnover designs; always report break-even cost.
 - Report 2 suggests a median composite of venues and forward-filled prices:
   NOT adopted (never merge exchanges, never fabricate candles); the continuous
   history + untradeable hours already handle outages.
@@ -319,6 +325,9 @@ Where the reports conflict with this project, the project wins:
   every backtest trial.
 
 ## Status
+Default fee switched to Bybit EU 0.25% on 22 Nov 2026 (results below at
+0.80% are kept as recorded; test DB at 0.25%: 50% core + trend + MACD x1.17,
+S2 momentum x0.50 ahead from 12/13 start years, Daily trend + MACD x0.63).
 Roadmap 9a-9d BUILT 22 Nov 2026 (owner: "do everything"), 250 tests pass.
 First run on the cloud TEST DB (real external data from Coin Metrics, not the
 owner's DB; owner to run `run_strategy_research` on the PC), fee 0.80%, full

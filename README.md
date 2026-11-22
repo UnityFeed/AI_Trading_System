@@ -2,7 +2,7 @@
 
 A personal BTC/USD research and paper-trading app. It keeps 13 years of hourly
 price data from three exchanges, calculates the usual indicators, tests trading
-strategies honestly (with real Kraken fees, no look-ahead, against simply
+strategies honestly (with your real Bybit EU fees, no look-ahead, against simply
 holding BTC), and runs the chosen strategy with virtual money.
 
 **Live trading is not enabled.** Everything runs on your own PC.

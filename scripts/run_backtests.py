@@ -16,8 +16,8 @@ Full results are written to data/backtests/ (one CSV per timeframe) for
 opening in Excel. The database is only read.
 
 Usage:
-    python -m scripts.run_backtests                 (Kraken Pro taker fee 0.80%)
-    python -m scripts.run_backtests --fee 0.40      (maker / limit-order fee)
+    python -m scripts.run_backtests                 (Bybit EU fee 0.25%, the default)
+    python -m scripts.run_backtests --fee 0.80      (Kraken market orders, for comparison)
     python -m scripts.run_backtests --timeframes 4h 1d
 """
 
@@ -201,7 +201,7 @@ def main() -> None:
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--fee", type=float, default=CostSettings().fee_pct,
-                        help="fee per buy or sell, in percent (default 0.80)")
+                        help="fee per buy or sell, in percent (default 0.25, Bybit EU)")
     parser.add_argument("--slippage", type=float, default=CostSettings().slippage_pct,
                         help="slippage per buy or sell, in percent (default 0.05)")
     parser.add_argument("--timeframes", nargs="+", default=["1h", "4h", "1d"],

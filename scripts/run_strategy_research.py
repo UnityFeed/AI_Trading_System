@@ -8,7 +8,7 @@ For each strategy (all on the full continuous history, Kraken fees):
   the exposure-matched benchmark (fixed mix with the same average BTC share)
 - the three eras: 2013-2016, 2017-2021, 2022-now (vs buy-and-hold)
 - how many "1 January" start years end with more BTC than holding
-- how the result changes with the fee (0.10 / 0.26 / 0.40 / 0.80%)
+- how the result changes with the fee (0.10 / 0.25 / 0.40 / 0.80%)
 - Deflated Sharpe Ratio: is the Sharpe higher than the best of N random
   tries would reach by luck? N = every trial in the ledger + this run
 - PBO: how often the strategy that looks best on half the history ends in
@@ -46,7 +46,7 @@ ERAS = (
     ("2017-21", datetime(2017, 1, 1, tzinfo=timezone.utc), datetime(2022, 1, 1, tzinfo=timezone.utc)),
     ("2022-now", datetime(2022, 1, 1, tzinfo=timezone.utc), END_OF_DATA),
 )
-FEE_LEVELS = (0.10, 0.26, 0.40, 0.80)
+FEE_LEVELS = (0.10, 0.25, 0.40, 0.80)
 
 
 def pct(value) -> str:
@@ -159,7 +159,7 @@ def main() -> None:
     print(f"{'strategy':<34}" + "".join(f"{f'{fee:.2f}%':>9}" for fee in FEE_LEVELS))
     for row in rows:
         print(f"{row['definition'].name[:33]:<34}" + "".join(f"{'x' + format(row['fees'][fee], '.2f'):>9}" for fee in FEE_LEVELS))
-    print("  Kraken Pro: 0.80% taker / 0.40% maker at the lowest tier; 0.10-0.26% is what the research assumed.")
+    print("  Bybit EU (your account): 0.25%; Bybit global 0.10%; Kraken Pro 0.80% taker / 0.40% maker.")
     print()
 
     # 4. Luck checks

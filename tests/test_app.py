@@ -193,7 +193,7 @@ class TestServer(unittest.TestCase):
         graded = next(s for s in strategies if s["kind"] == "exposure" and s["id"] == "sma-ensemble-1d")
         self.assertFalse(graded["supports_margin"])
 
-        compare = json.loads(self.get("/api/compare?fee=0.8&start=all")[1])
+        compare = json.loads(self.get("/api/compare?fee=0.25&start=all")[1])
         self.assertEqual(len(compare["rows"]), len(strategies))
         by_id = {r["id"]: r for r in compare["rows"]}
         # No external data in this test: those strategies say so instead of failing.

@@ -41,7 +41,12 @@ from src.reporting.dashboard import exchange_status
 
 
 TIMEFRAMES = ("1h", "4h", "1d")
-FEES = (0.80, 0.40)
+FEES = (0.25, 0.80, 0.40)  # first = default (Bybit EU, the owner's exchange)
+FEE_LABELS = {
+    0.25: "Bybit EU (your account)",
+    0.80: "Kraken market orders",
+    0.40: "Kraken limit orders",
+}
 LEVERAGES = (1.0, 2.0, 3.0, 5.0, 10.0)  # Kraken allows up to 20x on BTC/USD
 MAX_CHUNK = 5000
 
@@ -221,6 +226,7 @@ def make_handler(state: AppState):
                 return self._json({
                     "active": ACTIVE_STRATEGY_ID,
                     "fees": FEES,
+                    "fee_labels": {str(f): FEE_LABELS[f] for f in FEES},
                     "leverages": LEVERAGES,
                     "start_years": state.start_years(),
                     "strategies": [
