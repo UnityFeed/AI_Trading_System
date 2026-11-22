@@ -345,6 +345,22 @@ history 2013-now, buy and hold +47,586% (worst drop 85%, Sharpe 1.02):
   market); "beats holding" (daily return above buy-and-hold) 0.00-0.01 for
   all: no strategy convincingly beats holding day by day. PBO across the 12
   = 0.39 (ranking carries over only weakly).
+- CONFIRMED on the owner's REAL DB 22 Nov 2026 (`run_strategy_research`,
+  0.80% fee; buy and hold +48,619%, drop 85%, Sharpe 1.02, PBO 0.31):
+  | strategy                | total    | vs hold | drop | Sharpe | BE fee | vs mix | starts |
+  | 50% core + trend + MACD | +54,256% | x1.12   | 69%  | 1.14   | 1.21%  | x1.93  | 9/13   |
+  | Daily trend + MACD      | +27,999% | x0.58   | 58%  | 1.13   | never  | x4.12  | 9/13   |
+  | Daily uptrend dip       | +22,612% | x0.47   | 78%  | 1.05   | never  | x1.98  | 11/13  |
+  | Daily EMA 200 + 20/50   | +17,425% | x0.36   | 63%  | 1.16   | never  | x6.24  | 7/13   |
+  | S1-S9 (report)          | +1,301% to +10,910% | x0.03-x0.23 | 57-72% | 0.72-1.04 | never | | 1-4/13 |
+  50% core + trend + MACD by era: 2013-16 x0.91, 2017-21 x1.00, 2022-now x1.15;
+  by fee x1.34 (0.10%) / x1.24 (0.40%) / x1.12 (0.80%). Only strategy ahead
+  of holding over the full history. Caveat: its overlay was chosen on
+  2013-2021 and 2022-now has been looked at often, so forward paper trading
+  is the real test. Deflated Sharpe "beats holding" is 0.01 for all: it
+  compares AVERAGE daily returns, which favours holding more BTC; a strategy
+  can end higher (less volatility drag) with a lower daily average, so this
+  check is harsh for part-invested strategies.
 - Order-flow recorder tested live 22 Nov 2026: 130,559 Kraken trades in 24 h
   -> 24 hourly rows; order book 500 levels reach ~1.5% below / 3.5% above.
 Done: data layer for 3 exchanges, update/import scripts, integrity, comparison and
