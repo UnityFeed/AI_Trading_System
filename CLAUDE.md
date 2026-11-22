@@ -51,7 +51,9 @@ Run scripts as modules (`-m scripts.name`, no `.py`) because imports start with 
   Sortino, break-even fee, top-20 days, exposure-matched mix; graded
   strategies show every change of the BTC share). The button "Update data & run paper
   trader" does the daily routine. Keep the black window open; close it to stop.
-- Activate venv: `.venv\Scripts\Activate.ps1` (then `python` = venv python)
+- Activate venv: `.venv\Scripts\Activate.ps1` (then `python` = venv python).
+  ALWAYS activate it first: the system Python (3.15) has no pytest ("No module
+  named pytest" = venv not active). The prompt then starts with `(.venv)`.
 - DAILY ROUTINE (update data, paper trade, rebuild dashboard):
   `python -m scripts.daily_run` (`--open` opens the page; `--skip-update`;
   first run only: `--start YYYY-MM-DD`, default 1 Jan of this year)
@@ -375,6 +377,25 @@ TEST DB at 0.25% fee (owner to rerun all three scripts on the real DB):
   has real but modest skill (analog +0.12, logistic +0.06, well calibrated);
   using it to buy earlier inside 50% core + trend + MACD did not help (best of
   6 variants x1.40 vs x1.36 reference; the rest worse).
+CONFIRMED on the owner's REAL DB 22 Nov 2026 (0.25% fee; run with the system
+Python, not the venv, so pytest was missing there; scripts themselves ran):
+- Lab: 227,781 combinations in 549 s. 18 beat holding in BOTH eras; on 2022-now
+  61% of those were ahead vs 51% of the rest (choosing helps a little on real
+  data, unlike the test DB). Walk-forward 2017-now: single best x0.62 (3/10
+  years), top-10 x0.58 (4/10), best family (median) x1.33 (6/10). PBO 0.09,
+  Deflated Sharpe vs holding 0.00. Common ground identical to the test DB:
+  core 50%; trigger 28-day momentum top 20% (91% of its combinations ahead on
+  2022-now, median x1.42), breakout 50d high (76%); exits close < SMA200,
+  blow-off, EMA20/50 cross; filters EMA50>EMA200 (+ miners ok). The real
+  Coinbase premium (test DB had none) shows up in top picks as a filter for
+  buying 7-day drops.
+- Turning points: 43 lows/43 highs; same lags (strategies buy ~45-50 days and
+  9-31% after lows); same lifts (before lows: RSI/dist SMA20 lowest 10% ->
+  2.6-2.7x; Coinbase premium highest 10% -> 2.4x; before highs: price far above
+  the 200-week average -> 3.3x).
+- ML: up30 no skill (-0.25/-0.21); low20 analog +0.122, logistic +0.057, well
+  calibrated; early-low overlay did not beat the reference (50% core + trend +
+  MACD from 2017: x1.51; best variant x1.46).
 Default fee switched to Bybit EU 0.25% on 22 Nov 2026 (results below at
 0.80% are kept as recorded; test DB at 0.25%: 50% core + trend + MACD x1.17,
 S2 momentum x0.50 ahead from 12/13 start years, Daily trend + MACD x0.63).
