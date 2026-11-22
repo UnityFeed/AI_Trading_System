@@ -241,6 +241,33 @@ open, high, low, close, volume. DB primary key:
   a minimum number of trades. 2022-now is never used to choose, only to test.
   Never tune on, or pick by, the unseen window.
 
+## Research input (owner, 22 Nov 2026)
+Two reports in `docs/research/` (read them before strategy work):
+- `2026-11-22_long_only_strategy_deep_dive_v2.md` (PRIMARY): evidence-graded
+  (A-E) review. Main finding = our result: daily trend rules halve drawdowns
+  but do not beat buy-and-hold on return, because BTC's gains are concentrated
+  in a few rebound days when a trend filter is out. Fix: never be fully out
+  (core + trend overlay, graded exposure 0-100%, banded BTC/cash rebalance,
+  volatility cap). Ranked shortlist S1-S9 (section 8), methodology (trials
+  ledger, walk-forward, CPCV, Deflated Sharpe, PBO, exposure-matched
+  benchmark, break-even cost, top-20-days capture), free data endpoints with
+  point-in-time rules. Explicit skips: halving timing, weekday effects,
+  Stock-to-Flow, Pi Cycle, Fear & Greed, ETF flows, funding/OI timing,
+  standalone daily RSI/Bollinger mean reversion.
+- `2026-11-22_market_research_blueprint.md` (VISION, long term): multi-layer
+  engine (regime, derivatives, order flow, on-chain, macro, news, options).
+  Most derivatives/order-flow data has no free multi-year history, and its
+  market snapshot figures are unverified; use for later phases only.
+Where the reports conflict with this project, the project wins:
+- Fees: reports assume 0.10-0.26%; the owner's real Kraken fee is 0.80%
+  (0.40% maker). Favour low-turnover designs; always report break-even cost.
+- Report 2 suggests a median composite of venues and forward-filled prices:
+  NOT adopted (never merge exchanges, never fabricate candles); the continuous
+  history + untradeable hours already handle outages.
+- Holdout: 2022-now has been looked at many times, so it is no longer a clean
+  holdout. The clean test from now on is forward paper trading; keep a log of
+  every backtest trial.
+
 ## Status
 Done: data layer for 3 exchanges, update/import scripts, integrity, comparison and
 anomaly tooling, SMA, hourly returns, SMA crossover signals.
@@ -472,10 +499,24 @@ Known issues:
 8. Risk engine (proposed paper values, not approved: 0.5% risk per trade, 2% max
    daily loss, 5 positions, 2.5% aggregate open risk, no leverage, stop required,
    emergency shutdown) with veto power over the paper trader.
-9. PARKED (owner, 21 Nov 2026): strategy research, roadmap 5b-5e (wider
-   building blocks, random-entry baseline, limit-order fills, hold-by-default
-   variant), then regime detection, historical analogues, scenario engine,
-   probability calibration, prediction log, ML.
+9. Strategy research, based on `docs/research/` (PROPOSED 22 Nov 2026, waiting
+   for owner go-ahead; replaces the parked 5b-5e list):
+   a. Engine: target exposure 0-100% (graded, rebalance only when the change is
+      >= a band, fees on the traded amount), exposure-matched buy-and-hold
+      benchmark, metrics: Sharpe, Sortino, average exposure, turnover,
+      break-even cost per trade, share of the top-20 days captured.
+   b. Trials ledger (every backtest run logged with parameters and results)
+      and validation: walk-forward, Deflated Sharpe Ratio, PBO.
+   c. Price-only candidates (report 2, section 8): S1 price/SMA ensemble
+      (20/50/100), S2 time-series momentum ensemble (28/56/91/182 days), S3 core
+      + overlay (50% core), S4 volatility cap, S5 banded BTC/cash rebalance
+      (60%, 10 pp band), S6 Donchian as an ensemble member. Each goes into the
+      registry so it gets the Strategy tester, chart and overview.
+   d. External data with immutable snapshots and 1-2 day lags: Coin Metrics
+      MVRV (S8 cap) and hash rate (S9 entry filter).
+   e. Survivor -> paper trading for >= 3 months (restart the paper account).
+   Later (vision report): regime detection, volatility forecasting, prediction
+   log with calibration, derivatives/on-chain layers if data allows.
 
 ## How to work with the owner
 - Beginner: explain important decisions (timestamps, pagination, validation,
