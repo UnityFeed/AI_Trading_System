@@ -3,7 +3,8 @@ Build 4h and 1d candles from clean hourly candles.
 
 Rules:
 - Periods follow UTC boundaries. 4h candles start at 00, 04, 08, 12, 16
-  and 20 UTC; daily candles start at 00:00 UTC. This matches how Kraken,
+  and 20 UTC; daily candles start at 00:00 UTC; weekly candles start on
+  Monday 00:00 UTC (168 hours). This matches how Kraken,
   Bitstamp and Coinbase define their own daily candles (checked against
   their live APIs on 21 Nov 2026).
 - Only complete periods are built. If any hour of a period is missing or
@@ -28,6 +29,7 @@ TIMEFRAME_HOURS = {
     "1h": 1,
     "4h": 4,
     "1d": 24,
+    "1w": 168,  # weeks start Monday 00:00 UTC (as on Kraken, Bitstamp and TradingView)
 }
 
 HOUR = timedelta(hours=1)
@@ -52,6 +54,10 @@ def period_start(timestamp: datetime, timeframe: str) -> datetime:
 
     hours = TIMEFRAME_HOURS[timeframe]
     utc = timestamp.astimezone(timezone.utc)
+
+    if timeframe == "1w":
+        day = utc.replace(hour=0, minute=0, second=0, microsecond=0)
+        return day - timedelta(days=day.weekday())
 
     return utc.replace(
         hour=utc.hour - utc.hour % hours,
@@ -108,7 +114,7 @@ def aggregate_hourly_candles(
 ) -> AggregationResult:
     """
     Combine clean hourly candles into complete candles of a longer
-    timeframe ("1h", "4h" or "1d").
+    timeframe ("1h", "4h", "1d" or "1w").
     """
 
     if timeframe not in TIMEFRAME_HOURS:

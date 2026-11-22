@@ -6,6 +6,9 @@ from src.analysis.primary_history import PRIMARY_LABEL, ContinuousHistory
 from src.backtesting.conditions import EXITS, TREND_FILTERS, TRIGGERS, VOLUME_FILTERS
 from src.backtesting.engine import CostSettings, MarginSettings, run_backtest
 from src.backtesting.exposure import VOTE_TEXT, VOTES, ExposureSpec
+from src.research.lab import parse_vote
+
+LAB_TRIGGERS = ("momentum 28d strong (rank>0.8)",)
 from src.backtesting.market import build_market
 from src.backtesting.report import (
     btc_vs_hold, signals, start_year_table, strategy_report, strategy_state, trade_markers_from_report,
@@ -27,6 +30,10 @@ class TestRegistry(unittest.TestCase):
                 if s.kind == "exposure":
                     self.assertIsNone(s.spec)
                     for vote in s.exposure.votes:
+                        if vote.startswith("lab:"):
+                            spec = parse_vote(vote)
+                            self.assertIn(spec.trigger, LAB_TRIGGERS)
+                            continue
                         self.assertIn(vote, VOTES)
                         self.assertIn(vote, VOTE_TEXT)
                     self.assertTrue(0 < s.exposure.band < 1)
@@ -240,6 +247,8 @@ class TestGradedStrategy(unittest.TestCase):
         for definition in STRATEGIES:
             if definition.kind != "exposure" or definition.exposure.needs_external:
                 continue
+            if any(v.startswith("lab:") for v in definition.exposure.votes):
+                continue  # lab strategies need daily candles (tested in test_research_lab.py)
             with self.subTest(strategy=definition.id):
                 report = strategy_report(self.market, replace(definition, timeframe="1h"), NO_COSTS)
                 self.assertIn("summary", report)

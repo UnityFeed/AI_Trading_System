@@ -40,7 +40,7 @@ from src.paper_trading.trader import KILL_SWITCH
 from src.reporting.dashboard import exchange_status
 
 
-TIMEFRAMES = ("1h", "4h", "1d")
+TIMEFRAMES = ("1h", "4h", "1d", "1w")
 FEES = (0.25, 0.80, 0.40)  # first = default (Bybit EU, the owner's exchange)
 FEE_LABELS = {
     0.25: "Bybit EU (your account)",

@@ -227,7 +227,11 @@ def plan(market: Market, spec: ExposureSpec) -> ExposurePlan:
     else:
         votes = []
         for name in spec.votes:
-            votes.append(VOTES[name](market))
+            if name.startswith("lab:"):  # a state machine from the strategy lab
+                from src.research.lab import lab_vote
+                votes.append(lab_vote(market, name))
+            else:
+                votes.append(VOTES[name](market))
             components[name] = votes[-1]
         targets = []
         for i in range(n):

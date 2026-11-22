@@ -407,6 +407,12 @@ def exposure_state(
     if spec.core:
         rules.append({"role": "Core", "rule": f"{spec.core:.0%} always held", "met": True})
     for name in spec.votes:
+        if name.startswith("lab:"):
+            from src.research.lab import vote_details
+            rules.extend(vote_details(market, name, last_i))
+            rules.append({"role": "Holding (overlay)", "rule": "the buy rules fired and no sell rule since",
+                          "met": flag(parts[name][last_i])})
+            continue
         rules.append({"role": "Vote", "rule": VOTE_TEXT.get(name, name), "met": flag(parts[name][last_i])})
     if spec.vol_target_pct is not None:
         vol = parts["volatility"][last_i]

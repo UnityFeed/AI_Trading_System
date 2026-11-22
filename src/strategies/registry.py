@@ -203,6 +203,31 @@ STRATEGIES: tuple[StrategyDefinition, ...] = (
         ),
         origin=f"Report shortlist #7 (hash-rate trend; evidence B-). {FIXED_IN_ADVANCE}",
     ),
+    # -- strategy lab (scripts/run_strategy_lab.py), 22 Nov 2026 ---------------
+    StrategyDefinition(
+        id="lab-weekly-momentum-core50-1d",
+        name="Lab: weekly MACD + momentum, 50% core",
+        timeframe="1d",
+        spec=None,
+        exposure=ExposureSpec(
+            "50% always + 50% from BUY 28-day momentum in its top 20% while weekly MACD > signal "
+            "| SELL close crosses below the 200-day average",
+            ("lab:weekly macd>signal|momentum 28d strong (rank>0.8)|close crosses below sma200|",),
+            core=0.5,
+        ),
+        description=(
+            "Always keep 50% in BTC. Buy the other 50% when the weekly MACD (last completed week) "
+            "is above its signal line AND the 28-day return is stronger than 80% of all earlier "
+            "days (buy strength, not dips). Sell that 50% only when the price closes below its "
+            "200-day average. Few trades, rides long trends."
+        ),
+        origin=(
+            "Strategy lab, 200,145 combinations on the test DB, 0.25% fee: each building block is "
+            "the one with the best MEDIAN score on 2013-2021 over all combinations containing it "
+            "(filter, trigger, exit, core); 2022-now was not used to choose. Not the single best "
+            "combination (that one did worse on 2022-now)."
+        ),
+    ),
 )
 
 ACTIVE_STRATEGY_ID = "trend-macd-1d"  # followed by the paper trader

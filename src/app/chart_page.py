@@ -151,7 +151,7 @@ CHART_SCRIPT = r"""
   var settings = load('chart-settings', {});
   var params = new URLSearchParams(location.search);
   var tf = params.get('tf') || load('chart-tf', '1d');
-  if (['1h', '4h', '1d'].indexOf(tf) < 0) tf = '1d';
+  if (['1h', '4h', '1d', '1w'].indexOf(tf) < 0) tf = '1d';
   var source = null;  // id of the selected strategy (shared with the other pages)
   var state = null;   // where that strategy stands now (/api/strategy-state)
   // A timeframe that arrived through a link is remembered like a manual choice.
@@ -167,7 +167,7 @@ CHART_SCRIPT = r"""
 
   // ---- toolbar --------------------------------------------------------------
   var tfBox = document.getElementById('tf');
-  ['1h', '4h', '1d'].forEach(function (name) {
+  ['1h', '4h', '1d', '1w'].forEach(function (name) {
     var b = document.createElement('button'); b.type = 'button'; b.textContent = name;
     b.setAttribute('aria-pressed', name === tf ? 'true' : 'false');
     b.addEventListener('click', function () {

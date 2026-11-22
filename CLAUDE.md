@@ -83,6 +83,17 @@ Run scripts as modules (`-m scripts.name`, no `.py`) because imports start with 
   `python -m scripts.run_strategy_research` (`--fee 0.40`, `--no-log`).
   `run_backtests`, `run_walk_forward` and this script append to the trials
   ledger `data/backtests/trials.csv` (gitignored, append-only).
+- STRATEGY LAB (~200,000 combinations: filter x trigger x exit x trailing
+  stop x core share, all CPU cores, ~6 min on 4 cores; chosen on 2013-2021 only,
+  walk-forward, common ground, Deflated Sharpe, PBO):
+  `python -m scripts.run_strategy_lab` (`--fee 0.80`, `--workers 2`); every
+  result in `data/backtests/lab_results.csv`
+- Turning points (swing lows/highs, how late each strategy acts, what features
+  look like before lows/highs): `python -m scripts.run_turning_points`
+- Machine learning (walk-forward logistic regression and nearest-neighbour
+  "analog" models: up in 30 days, swing low within 20 days; Brier/log loss/
+  calibration; trading tests; ~20 s): `python -m scripts.run_ml_research`;
+  predictions kept in `data/backtests/ml_predictions_<time>.csv`
 - External daily data (Coin Metrics: MVRV, market cap, hash rate; free, no
   key): `python -m scripts.update_external_data` (the daily routine and the
   app button also do it) -> `database/external_data.db`
@@ -167,6 +178,16 @@ Run scripts as modules (`-m scripts.name`, no `.py`) because imports start with 
   `KrakenTradesProvider.fetch_trades_with_side` keeps the taker side.
 - `src/data_collection/exchange_updater.py`: `update_all_exchanges(repository,
   log)` (moved from the script; `scripts/update_all_exchanges.py` is a wrapper)
+- `src/research/` (roadmap 10): `features.py` (`build_frame`: ~39 daily
+  features known at the close: trend, momentum, cycle (drop from ATH, 200-week
+  average), volatility, volume, candle wicks, WEEKLY chart (last completed week
+  only), on-chain (lagged), Coinbase premium; each also as an expanding
+  percentile rank 0..1, no look-ahead; `weekly_from_daily`, `coinbase_premium`),
+  `turning_points.py` (`zigzag`, `lag_study`, `event_study`), `lab.py`
+  (`building_blocks`, `LabSpec` state machine, parallel `run_search`, `walk_forward`
+  single/family/top10, `lab_vote`: registry votes named
+  `lab:FILTER|TRIGGER|EXIT|TRAIL`), `models.py` (logistic regression, analog
+  kNN, point-in-time labels, walk-forward predictions, `score`)
 - `src/risk_management/`, `src/execution/`: empty packages (not started)
 - `scripts/`: update, integrity, comparison, anomaly, research and app tools;
   `scripts/archive/` holds finished one-time jobs (initial imports incl. the
@@ -215,7 +236,9 @@ open, high, low, close, volume. DB primary key:
   `get_clean_candles` skips them by default, so they become gaps. They stay in
   the database. Only Bitstamp has them (122, incl. 107 h outage 5-9 Jan 2015).
 - DB migration and the Kraken CSV import are done. Never repeat them.
-- Timeframes: 1h (primary), 4h, 1d. 4h/1d are derived in memory from clean
+- Timeframes: 1h (primary), 4h, 1d, and 1w (added 22 Nov 2026: weeks start
+  Monday 00:00 UTC, chart only + weekly features; a weekly value is used by a
+  daily strategy only after the week has closed). 4h/1d are derived in memory from clean
   hourly candles (not stored in the DB), on UTC boundaries (4h at 00/04/../20,
   1d at 00:00), timestamp = period start. A period with any missing/excluded
   hour is skipped, never built from partial data. Verified 21 Nov 2026 against
@@ -325,6 +348,33 @@ Where the reports conflict with this project, the project wins:
   every backtest trial.
 
 ## Status
+Strategy lab, turning points, ML and weekly chart BUILT 22 Nov 2026 (owner:
+"unleash every calculation power"), 264 tests pass. First run on the cloud
+TEST DB at 0.25% fee (owner to rerun all three scripts on the real DB):
+- Lab: 200,145 combinations in 5 min. Only 9 of 106,749 eligible beat holding
+  in BOTH 2013-16 and 2017-21, and those did WORSE on 2022-now (33% ahead) than
+  the rest (52%): picking the single best is luck. Walk-forward 2017-now: single
+  best x0.64, top-10 average x0.53, best family (median) x1.54 (ahead 4/10
+  years). PBO 0.07 (rankings carry over), Deflated Sharpe vs holding 0.00.
+- Common ground (median over all combinations, chosen on 2013-21): 50% core
+  >> 33% >> 0%; triggers that buy STRENGTH (28-day momentum in its top 20%,
+  breakout above the 50-day high) beat dip buying; filters weekly MACD > signal,
+  EMA50 > EMA200, close > SMA200, "miners ok"; exits close < SMA200, blow-off
+  (28-day gain rank > 0.95), EMA20/50 cross down.
+- Registered "Lab: weekly MACD + momentum, 50% core" (best median block per
+  role on 2013-21): full history x1.39 vs holding, drop 75%, Sharpe 1.19,
+  break-even fee 3.5%, ~1 trade/year, ahead from 10/13 start years; 2022-now
+  (not used to choose) x1.41.
+- Turning points (20% zigzag, 42 lows/43 highs): strategies buy ~45-50 days
+  and 13-33% after lows, sell ~25-40 days and 14-18% below highs. Before lows:
+  RSI, distance below SMA20/50, 50-day range position in their lowest 10% ->
+  a low within 20 days is 2.5-2.7x more likely. Before highs: price far above
+  SMA20/50/100/200-week -> 2.9-3.3x more likely.
+- ML (walk-forward 2017-now, leak-free labels): "up in 30 days" has NO skill
+  (Brier skill -0.21/-0.28, trading on it loses). "Swing low within 20 days"
+  has real but modest skill (analog +0.12, logistic +0.06, well calibrated);
+  using it to buy earlier inside 50% core + trend + MACD did not help (best of
+  6 variants x1.40 vs x1.36 reference; the rest worse).
 Default fee switched to Bybit EU 0.25% on 22 Nov 2026 (results below at
 0.80% are kept as recorded; test DB at 0.25%: 50% core + trend + MACD x1.17,
 S2 momentum x0.50 ahead from 12/13 start years, Daily trend + MACD x0.63).
@@ -632,6 +682,12 @@ Known issues:
    f. Order flow (CVD, VWAP, order book) is being recorded from 22 Nov 2026
       (`start_recorder.bat`); test it once there are months of it. Show CVD on
       the chart when useful.
+10. [BUILT 22 Nov 2026, test DB] Research engine: weekly chart, feature
+   library, turning-point study, strategy lab, ML models (see Status). NEXT:
+   owner runs `run_strategy_lab`, `run_turning_points`, `run_ml_research` on
+   the real DB; then decide the paper-trading strategy (candidates: Lab weekly
+   MACD + momentum 50% core, 50% core + Daily trend + MACD). Ideas: lab with
+   graded (2-3 step) overlays; ML features from order flow once recorded.
    Later (vision report): regime detection, volatility forecasting, prediction
    log with calibration, derivatives/on-chain layers if data allows.
 
