@@ -266,6 +266,14 @@ Two reports in `docs/research/` (read them before strategy work):
   engine (regime, derivatives, order flow, on-chain, macro, news, options).
   Most derivatives/order-flow data has no free multi-year history, and its
   market snapshot figures are unverified; use for later phases only.
+- `2026-11-22_strategy_feasibility.md` (our own check, 22 Nov 2026): which
+  strategies and data are (A) possible now from our candles, (B) possible
+  with free history downloads (MVRV, hash rate, FRED, funding from 2019,
+  DVOL from 2021), (C) only collectable from now on (order books, open
+  interest, liquidations, options). All best-evidence strategies (S1-S6,
+  S8, S9) are A or B; order-flow/derivatives ideas are lowest priority at
+  a 0.80% fee. Kraken public trades include the buy/sell side (CVD
+  possible; `kraken_trades_provider` currently drops it).
 Where the reports conflict with this project, the project wins:
 - Fees: reports assume 0.10-0.26%; the owner's real Kraken fee is 0.80%
   (0.40% maker). Favour low-turnover designs; always report break-even cost.
