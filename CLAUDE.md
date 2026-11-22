@@ -377,6 +377,18 @@ TEST DB at 0.25% fee (owner to rerun all three scripts on the real DB):
   has real but modest skill (analog +0.12, logistic +0.06, well calibrated);
   using it to buy earlier inside 50% core + trend + MACD did not help (best of
   6 variants x1.40 vs x1.36 reference; the rest worse).
+`run_strategy_research` on the REAL DB 22 Nov 2026, 0.25% fee (buy and hold
++49,161%, drop 85%, Sharpe 1.02): Lab weekly MACD + momentum 50% core is the
+best registered strategy: +71,615%, x1.46 vs holding, drop 73%, Sharpe 1.20,
+break-even fee 3.41%, x3.05 vs the exposure-matched mix, ahead from 10/13 start
+years; by era 2013-16 x0.97, 2017-21 x1.00, 2022-now x1.44 (not used to
+choose); by fee x1.48/x1.46/x1.43/x1.36 (0.10/0.25/0.40/0.80%); ~1 round trip a
+year. Second: 50% core + Daily trend + MACD x1.29 (2022-now x1.23). Daily
+trend + MACD x0.81 (2022-now x1.78, drop 57%). PBO across the 13 registered
+strategies 0.93: their ranking on one half of the history does NOT carry over
+to the other half (strategies win in different regimes), so a single winner
+among them is not proven; Deflated Sharpe 0.00 for all with 227,818 trials
+counted. Forward paper trading decides.
 CONFIRMED on the owner's REAL DB 22 Nov 2026 (0.25% fee; run with the system
 Python, not the venv, so pytest was missing there; scripts themselves ran):
 - Lab: 227,781 combinations in 549 s. 18 beat holding in BOTH eras; on 2022-now
