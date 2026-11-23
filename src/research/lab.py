@@ -111,6 +111,9 @@ def building_blocks(frame: FeatureFrame) -> tuple[dict[str, Flags], dict[str, Fl
         "miners ok": _value(f, "chain.hash_stress", below=0.5),
         "calm volatility (rank<0.5)": _rank(f, "vol.realized_30d", below=0.5),
         "coinbase premium>0 (7d)": _value(f, "flow.coinbase_premium_7d", above=0),
+        "daily structure up": _value(f, "structure.trend", above=0.5),
+        "weekly structure up": _value(f, "structure.weekly_trend", above=0.5),
+        "weekly structure not down": _value(f, "structure.weekly_trend", above=-0.5),
     }
     # Two-filter combinations: a trend view AND a context view.
     trend_views = ["ema50>ema200", "close>ema200", "close>sma200", "close>200w_avg", "weekly close>ema20",
@@ -147,6 +150,8 @@ def building_blocks(frame: FeatureFrame) -> tuple[dict[str, Flags], dict[str, Fl
         "hash growth recovers": _up_cross(_value(f, "chain.hash_growth_30_90", above=0), cons),
         "rebound 10% from 91d low": _up_cross(_value(f, "cycle.rise_from_low_91d", above=0.10), cons),
         "coinbase premium turns positive": _up_cross(_value(f, "flow.coinbase_premium_7d", above=0), cons),
+        "daily CHoCH up": _value(f, "structure.days_since_choch_up", below=0.5),
+        "daily structure turns up": _up_cross(_value(f, "structure.trend", above=0.5), cons),
     }
     exits = {
         "filter_off": None,  # handled in simulate(): sell when the filter turns false
@@ -165,6 +170,8 @@ def building_blocks(frame: FeatureFrame) -> tuple[dict[str, Flags], dict[str, Fl
         "mvrv expensive (rank>0.9)": _rank(f, "chain.mvrv_z", above=0.9),
         "blow-off: 28d gain rank>0.95": _rank(f, "mom.ret_28d", above=0.95),
         "never (only trail/filter)": [False] * n,
+        "daily CHoCH down": _value(f, "structure.days_since_choch_down", below=0.5),
+        "weekly structure turns down": _up_cross(_value(f, "structure.weekly_trend", below=-0.5), cons),
     }
     return filters, triggers, exits
 

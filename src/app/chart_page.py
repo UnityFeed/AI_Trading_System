@@ -143,7 +143,8 @@ CHART_SCRIPT = r"""
     ['ema20', 'EMA 20', '--ema20', true], ['ema50', 'EMA 50', '--ema50', true], ['ema200', 'EMA 200', '--ema200', true],
     ['bb', 'Bollinger', '--text-muted', false], ['trades', 'Trades (B = buy, S = sell)', '--text-primary', true],
     ['volume', 'Volume', '--text-muted', true], ['rsi', 'RSI 14', '--rsi', true],
-    ['macd', 'MACD', '--macd', true], ['atr', 'ATR 14', '--atr', false]
+    ['macd', 'MACD', '--macd', true], ['atr', 'ATR 14', '--atr', false],
+    ['structure', 'Structure (swings, BOS / CHoCH)', '--warning', true]
   ];
   function load(key, fallback) { try { var v = localStorage.getItem(key); return v === null ? fallback : JSON.parse(v); } catch (e) { return fallback; } }
   function save(key, value) { try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) {} }
@@ -160,6 +161,7 @@ CHART_SCRIPT = r"""
   TOGGLES.forEach(function (t) { enabled[t[0]] = settings[t[0]] === undefined ? t[3] : settings[t[0]]; });
 
   var cache = {};   // timeframe -> {candles, indicators, markers, hasMore}
+  var structures = {};  // timeframe -> market structure (/api/structure)
   var chart = null, builtTf = null, series = {}, loading = false, markersLayer = null;
 
   function css(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
@@ -229,6 +231,9 @@ CHART_SCRIPT = r"""
       icon.textContent = r.met === null ? '?' : (r.met ? '\u2713' : '\u2013');
       b.appendChild(icon); b.appendChild(document.createTextNode(r.role)); b.title = r.rule; strip.appendChild(b);
     });
+    var st = structures[tf];
+    if (st) part(tf + ' structure: ' + st.trend.toUpperCase() + (st.swing_high ? ' · swing high ' + fmt(st.swing_high, 0) : '') +
+                 (st.swing_low ? ' · swing low ' + fmt(st.swing_low, 0) : ''), 'pill');
     if (state.signal) part(state.signal.action + ' SIGNAL at the next open' +
       (state.signal.target_pct !== undefined ? ' (to ' + state.signal.target_pct.toFixed(0) + '% BTC)' : ''), 'pill warn');
     part('as of the ' + state.strategy.timeframe + ' close of ' + state.candle_time.slice(0, 16).replace('T', ' ') + ' UTC', 'muted');
@@ -239,7 +244,17 @@ CHART_SCRIPT = r"""
     var url = '/api/chart?tf=' + tf + '&limit=3000&trades=' + encodeURIComponent(source) + (before ? '&before=' + before : '');
     return fetch(url).then(function (r) { return r.json(); });
   }
+  function loadStructure() {
+    var frame = tf;
+    if (structures[frame]) return;
+    fetch('/api/structure?tf=' + frame).then(function (r) { return r.json(); }).then(function (d) {
+      structures[frame] = d;
+      if (frame === tf && cache[tf]) build();
+      renderState();
+    });
+  }
   function show() {
+    loadStructure();
     if (cache[tf]) { build(); return; }
     wrap.textContent = 'Loading ' + tf + ' candles...';
     fetchChunk(null).then(function (d) {
@@ -323,6 +338,14 @@ CHART_SCRIPT = r"""
     if (enabled.atr) { series.atr_14 = line('--atr', pane, {lastValueVisible: true}); small.push(pane++); }
 
     fill();
+    // Market structure: the last swing high and low (what has to break next).
+    var stl = structures[tf];
+    if (enabled.structure && stl) {
+      if (stl.swing_high) series.candles.createPriceLine({price: stl.swing_high, color: css('--up'), lineWidth: 1,
+        lineStyle: LWC.LineStyle.Dotted, axisLabelVisible: true, title: 'swing high'});
+      if (stl.swing_low) series.candles.createPriceLine({price: stl.swing_low, color: css('--down'), lineWidth: 1,
+        lineStyle: LWC.LineStyle.Dotted, axisLabelVisible: true, title: 'swing low'});
+    }
     // An open trade: dashed lines at the buy price and the stop.
     if (enabled.trades && state && state.position) {
       var pos = state.position;
@@ -369,9 +392,10 @@ CHART_SCRIPT = r"""
         return {time: k[0], value: k[5], color: (k[4] >= k[1] ? upVol : downVol) + '80'};
       }));
     }
+    var first = c.candles[0][0], ink = css('--text-primary');
+    var marks = [];
     if (enabled.trades) {
-      var first = c.candles[0][0], ink = css('--text-primary');
-      var marks = c.markers.filter(function (m) { return m.time >= first; }).map(function (m) {
+      marks = c.markers.filter(function (m) { return m.time >= first; }).map(function (m) {
         return m.side === 'buy'
           ? {time: m.time, position: 'belowBar', shape: 'arrowUp', color: ink, text: m.label || 'B'}
           : {time: m.time, position: 'aboveBar', shape: 'arrowDown', color: ink, text: m.label || 'S'};
@@ -382,10 +406,27 @@ CHART_SCRIPT = r"""
           ? {time: lastTime, position: 'belowBar', shape: 'circle', color: css('--warning'), text: 'BUY signal'}
           : {time: lastTime, position: 'aboveBar', shape: 'circle', color: css('--warning'), text: 'SELL signal'});
       }
-      // One markers layer per chart, updated in place (never stacked).
-      if (markersLayer) markersLayer.setMarkers(marks);
-      else markersLayer = LWC.createSeriesMarkers(series.candles, marks);
     }
+    var st = structures[tf];
+    if (enabled.structure && st) {
+      var muted = css('--text-muted'), up = css('--up'), down = css('--down');
+      st.pivots.forEach(function (p) {
+        if (p.time < first) return;
+        marks.push(p.kind === 'high'
+          ? {time: p.time, position: 'aboveBar', shape: 'circle', size: 0.5, color: muted, text: p.label || 'H'}
+          : {time: p.time, position: 'belowBar', shape: 'circle', size: 0.5, color: muted, text: p.label || 'L'});
+      });
+      st.events.forEach(function (e) {
+        if (e.time < first || e.kind === 'sweep') return;
+        marks.push(e.direction === 'up'
+          ? {time: e.time, position: 'belowBar', shape: 'arrowUp', color: up, text: e.kind}
+          : {time: e.time, position: 'aboveBar', shape: 'arrowDown', color: down, text: e.kind});
+      });
+    }
+    marks.sort(function (a, b) { return a.time - b.time; });
+    // One markers layer per chart, updated in place (never stacked).
+    if (markersLayer) markersLayer.setMarkers(marks);
+    else if (marks.length) markersLayer = LWC.createSeriesMarkers(series.candles, marks);
   }
 
   var box = document.getElementById('readout');

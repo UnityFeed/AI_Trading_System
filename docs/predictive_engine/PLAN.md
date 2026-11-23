@@ -40,6 +40,24 @@ cases, target zone and invalidation level, updated every day, and every
 forecast is stored and scored so the owner can see whether it works.
 
 ## Status
+- 23 Nov 2026 (test DB; owner to confirm on the real DB):
+  - Structure on the chart: toggle "Structure" (swing labels HH/HL/LH/LL,
+    BOS/CHoCH arrows, dotted last swing high/low lines, trend in the status
+    strip) on 1h/4h/1d/1w, from `/api/structure`.
+  - Phase 1 gate: structure added to the research features (daily trend,
+    weekly trend from completed weeks, distance to last swing high/low, days
+    since CHoCH) and lab blocks. Turning points: lift ~2.6 before lows (about
+    the same as existing distance-from-average features). Lab (255,597
+    combinations): structure filters dominate the 2013-21 ranking but do NOT
+    carry over (walk-forward family x0.85 vs x1.54 without them; top 25 ahead
+    on 2022-now 10/25); exit "weekly structure turns down" holds up (70% of its
+    combinations ahead on 2022-now). Verdict: no gain for trading strategies;
+    kept as context for scenarios, where it clearly shifts the odds.
+  - Phase 2 built: `outcomes.py` (bull/bear/range over 30 days, barriers at
+    1x volatility-scaled typical move, median 16%), `run_scenario_outcomes`.
+    Base rates all days: bull 32.5%, bear 18.5%, range 48.9%. Daily+weekly
+    up: bull 40.0% / bear 14.8%; both down: bull 25.8% / bear 15.6% / range
+    58.6% (today's situation). Next: phase 3 (models must beat these rates).
 - 22 Nov 2026: branch created; blueprint saved; phase 1 core built
   (`structure.py`: confirmed pivots, swing labels, trend state, BOS/CHoCH,
   sweeps; tests; `scripts/run_market_structure.py`). Next: run it on the real

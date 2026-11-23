@@ -161,6 +161,43 @@ def _weekly_features(market: Market) -> dict[str, Series]:
     return out
 
 
+def _structure_features(market: Market) -> dict[str, Series]:
+    from src.predictive_engine.structure import analyse
+
+    c = market.candles
+    n = len(c)
+    s = analyse(c, "1d")
+    trend_value = {"up": 1.0, "down": -1.0, "none": 0.0}
+    out: dict[str, Series] = {
+        "structure.trend": [trend_value[t] for t in s.trend],
+        "structure.dist_swing_high": [None if h is None else x.close / h - 1 for x, h in zip(c, s.swing_high)],
+        "structure.dist_swing_low": [None if l is None else x.close / l - 1 for x, l in zip(c, s.swing_low)],
+    }
+    for direction in ("up", "down"):
+        since: Series = [None] * n
+        last = None
+        events = {e.index for e in s.events if e.kind == "CHoCH" and e.direction == direction}
+        for i in range(n):
+            if i in events:
+                last = i
+            since[i] = None if last is None else float(i - last)
+        out[f"structure.days_since_choch_{direction}"] = since
+
+    weekly = weekly_from_daily(c)
+    if weekly:
+        ws = analyse(weekly, "1w")
+        trend: Series = [None] * n
+        k = -1
+        for i, x in enumerate(c):
+            day_close = x.timestamp + timedelta(days=1)
+            while k + 1 < len(weekly) and weekly[k + 1].timestamp + timedelta(days=7) <= day_close:
+                k += 1
+            if k >= 0:
+                trend[i] = trend_value[ws.trend[k]]
+        out["structure.weekly_trend"] = trend
+    return out
+
+
 def price_ema(values: list[float], n: int, consecutive: list[bool]) -> Series:
     """EMA seeded with the SMA of the first n values of each run."""
     out: Series = [None] * len(values)
@@ -263,6 +300,9 @@ def build_frame(market: Market, premium: dict[date, float] | None = None) -> Fea
 
     # weekly chart (last completed week)
     v.update(_weekly_features(market))
+
+    # market structure (predictive engine, phase 1): daily, and weekly from completed weeks
+    v.update(_structure_features(market))
 
     # on-chain (with publication delays)
     ext = market.external

@@ -115,7 +115,13 @@ market data and never touches the paper-trading files; its forecasts go to
 their own `database/predictions.db` (phase 4).
 - Market structure (phase 1): `python -m scripts.run_market_structure`
   (`--left 5 --right 5` for bigger swings): trend, last swing high/low,
-  labelled swings, BOS/CHoCH/sweeps on 1w/1d/4h.
+  labelled swings, BOS/CHoCH/sweeps on 1w/1d/4h. Also on the Chart page
+  (toggle "Structure", API `/api/structure?tf=`). Structure is in the research
+  features (`structure.*`) and lab blocks; it did NOT improve strategies
+  (walk-forward worse), see `docs/predictive_engine/PLAN.md` Status.
+- Scenario outcomes (phase 2): `python -m scripts.run_scenario_outcomes`
+  (`--horizon 30 --k 1.0`): bull/bear/range base rates overall, per year,
+  per daily/weekly structure, and for today's situation.
 
 ## Architecture (keep it; do not redesign without a clear reason)
 - `src/data_collection/`: `MarketData` dataclass, `data_validator`, `MarketDataProvider`
@@ -209,7 +215,9 @@ their own `database/predictions.db` (phase 4).
 - `src/predictive_engine/` (branch `predictive-engine`): `structure.py`
   (`raw_pivots`: pivot highs/lows confirmed `right` candles later;
   `analyse`: alternating labelled swings HH/LH/HL/LL, trend per candle,
-  BOS/CHoCH/sweep events; all causal, truncation-tested)
+  BOS/CHoCH/sweep events; all causal, truncation-tested), `outcomes.py`
+  (`outcomes`: bull/bear/range first-barrier labels on daily closes,
+  volatility-scaled barriers, decided index; `BaseRates`, `base_rates_by`)
 - `src/risk_management/`, `src/execution/`: empty packages (not started)
 - `scripts/`: update, integrity, comparison, anomaly, research and app tools;
   `scripts/archive/` holds finished one-time jobs (initial imports incl. the

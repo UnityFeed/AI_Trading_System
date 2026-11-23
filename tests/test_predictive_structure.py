@@ -92,3 +92,36 @@ class TestStructure(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestOutcomes(unittest.TestCase):
+
+    def market(self, closes):
+        from src.analysis.technical_indicators import calculate_indicators
+        from src.backtesting.market import Market
+        candles = candles_from(closes)
+        return Market("1d", candles, calculate_indicators(candles, "1d"), [True] * len(candles),
+                      [False] + [True] * (len(candles) - 1))
+
+    def test_first_barrier_wins_and_the_end_is_unknown(self):
+        from src.predictive_engine.outcomes import BaseRates, outcomes
+        flat = [100.0 + (i % 2) for i in range(40)]  # calm: barrier at the 3% floor
+        closes = flat + [100, 101, 104, 90, 100, 100, 100, 100, 100, 100]
+        out = outcomes(self.market(closes), horizon=5, k=1.0, min_move=0.03)
+        first = out[40]
+        self.assertEqual((first.kind, first.days), ("bull", 2))  # 104 >= 103 before the drop to 90
+        self.assertEqual(out[42].kind, "bear")  # from 104: 90 is below 100.88
+        self.assertEqual(out[44].kind, "range")
+        self.assertTrue(all(o is None for o in out[-5:]))  # not decided yet
+        rates = BaseRates.of([o for o in out if o is not None])
+        self.assertAlmostEqual(rates.bull + rates.bear + rates.range, 1.0)
+
+    def test_no_look_ahead_in_known_outcomes(self):
+        """An outcome decided before the cut is the same on the shortened history."""
+        from src.predictive_engine.outcomes import outcomes
+        closes = [c.close for c in random_walk(500)]
+        full = outcomes(self.market(closes))
+        part = outcomes(self.market(closes[:400]))
+        for a, b in zip(full[:400], part):
+            if a is not None and a.decided_index < 400 and b is not None:
+                self.assertEqual(a, b)

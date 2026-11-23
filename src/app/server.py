@@ -9,6 +9,7 @@ not reachable from other machines) that serves
   /api/chart     chart data in chunks (used by the chart page)
   /api/strategies, /api/backtest, /api/strategy-state   strategy data
   /api/compare   key numbers of every strategy side by side
+  /api/structure market structure of a timeframe (predictive engine, phase 1)
   /api/status    progress of a running job
   /api/run       POST: start the daily routine (update data + paper trader)
 
@@ -29,6 +30,7 @@ from src.app.strategy_page import strategy_page
 from src.backtesting.engine import CostSettings, MarginSettings
 from src.backtesting.exposure import MissingExternalData
 from src.backtesting.market import build_market
+from src.predictive_engine.structure import analyse as analyse_structure
 from src.backtesting.report import start_years, strategy_report, strategy_state, trade_markers_from_report
 from src.strategies.registry import ACTIVE_STRATEGY_ID, STRATEGIES, get_strategy
 from src.analysis.technical_indicators import indicator_tables
@@ -84,6 +86,7 @@ class AppState:
             self.markets = {}
             self.reports = {}
             self.states = {}
+            self.structures = {}
 
     def _market(self, timeframe: str):
         """Backtest market for one timeframe (call with data_lock held)."""
@@ -101,6 +104,30 @@ class AppState:
                 definition = get_strategy(strategy_id)
                 self.states[strategy_id] = strategy_state(self._market(definition.timeframe), definition)
             return self.states[strategy_id]
+
+    def structure(self, timeframe: str) -> dict:
+        """Market structure of one timeframe (swings, events, trend now), cached until reload."""
+        with self.data_lock:
+            if timeframe not in self.structures:
+                candles = self.tables[timeframe][0]
+                s = analyse_structure(candles, timeframe)
+                self.structures[timeframe] = {
+                    "timeframe": timeframe,
+                    "trend": s.trend[-1] if s.trend else "none",
+                    "swing_high": s.swing_high[-1] if s.swing_high else None,
+                    "swing_low": s.swing_low[-1] if s.swing_low else None,
+                    "pivots": [
+                        {"time": int(p.time.timestamp()), "price": p.price, "kind": p.kind, "label": p.label,
+                         "confirmed": p.confirmed_time.isoformat()}
+                        for p in s.pivots
+                    ],
+                    "events": [
+                        {"time": int(candles[e.index].timestamp.timestamp()), "kind": e.kind,
+                         "direction": e.direction, "level": e.level}
+                        for e in s.events
+                    ],
+                }
+            return self.structures[timeframe]
 
     def overview(self) -> str:
         with self.data_lock:
@@ -258,6 +285,12 @@ def make_handler(state: AppState):
                     return self._json(state.report(strategy_id, fee, leverage, start_year))
                 except MissingExternalData as error:
                     return self._json({"error": str(error)}, 409)
+
+            if url.path == "/api/structure":
+                timeframe = query.get("tf", ["1d"])[0]
+                if timeframe not in TIMEFRAMES:
+                    return self._json({"error": "unknown timeframe"}, 400)
+                return self._json(state.structure(timeframe))
 
             if url.path == "/api/compare":
                 try:

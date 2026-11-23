@@ -209,6 +209,15 @@ class TestServer(unittest.TestCase):
         with self.assertRaises(HTTPError):
             self.get("/api/compare?fee=0.1")
 
+    def test_structure_api(self):
+
+        data = json.loads(self.get("/api/structure?tf=4h")[1])
+        self.assertIn(data["trend"], ("up", "down", "none"))
+        self.assertIn("pivots", data)
+        self.assertIn("events", data)
+        with self.assertRaises(HTTPError):
+            self.get("/api/structure?tf=2h")
+
     def test_buttons_need_the_app_header(self):
 
         status, _ = self.post("/api/run?update=0")
