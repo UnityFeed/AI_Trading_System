@@ -40,6 +40,39 @@ cases, target zone and invalidation level, updated every day, and every
 forecast is stored and scored so the owner can see whether it works.
 
 ## Status
+- 23 Nov 2026 (later), phases 6-7 + the learning engine BUILT (test DB; owner
+  to confirm on the real DB with `run_learning_replay`):
+  - Chart tools (`levels.py`, `volume_profile.py`): support/resistance zones
+    (confirmed swings within 1.5%, touches = strength), automatic Fibonacci of
+    the last confirmed swing, ADX regime, volume profile (POC / value area,
+    estimated from hourly candles). Toggles "Support/resistance + Fibonacci",
+    "Volume profile"; regime in the tools strip.
+  - Patterns (`patterns.py`): double top/bottom, (inverse) head and
+    shoulders, ascending/descending/symmetrical triangles from swings known at
+    the time; life cycle candidate -> confirmed -> hit/failed/expired; patterns
+    the price had already left when they became known are skipped. Track record
+    (test DB): inverse H&S 68% hit, ascending triangle 56%, double bottom 48%,
+    H&S 47%, double top 42%, descending triangle 43%, symmetrical triangle 17%.
+    Toggle "Patterns" draws outline, neckline, target and status.
+  - Learning engine (`learner.py`, the owner's "AI that trains on the chart"):
+    replays every day from the first candle, learns from each outcome when it
+    becomes known, predicts bull/bear/range for 7/14/30 days from 51 features
+    (research features + structure + S/R distance + Fibonacci position + ADX +
+    patterns); experts base / structure / regime / learned (online softmax),
+    blended with learned Hedge weights (fixed share 5%, slow forgetting).
+    Settings changed ONCE after a first run (learned model overconfident,
+    weights collapsing): learning rate 0.05 -> 0.01, L2 1e-4 -> 1e-3, Hedge
+    eta 0.5 -> 0.1, forgetting 0.995 -> 0.999, learned model pulled to the base
+    rate while it has few examples. Result 2017-now: 7 days +1.1% vs base
+    (top scenario right 61%), 14 days +0.2%, 30 days -0.5%; uneven per year.
+    A look-ahead in the S/R / Fibonacci inputs (final swing list) was found by
+    the truncation test and fixed (swings as known each day).
+  - Replay on the chart (`service.py`, `/api/scenarios?h=&date=`,
+    `/api/tools?tf=&until=`): pick a date, step, play, "show what happened",
+    back to now; the chart hides everything after the replay day and shows the
+    AI's forecast, its trust in each expert and its score up to that day.
+    Live forecasts (no date) are logged per horizon in `predictions.db`.
+  - Report: `python -m scripts.run_learning_replay`.
 - 23 Nov 2026, phases 3-5 BUILT (test DB; owner to confirm on the real DB):
   - Phase 3 `scenarios.py` + `engine.py` (MODEL = analog, horizon 30 days,
     barriers 1x typical move): models base / structure / analog, walk-forward

@@ -211,10 +211,16 @@ class TestServer(unittest.TestCase):
 
     def test_scenarios_api(self):
 
-        data = json.loads(self.get("/api/scenarios")[1])
-        self.assertEqual(len(data["scenarios"]), 3)
-        self.assertAlmostEqual(sum(s["probability"] for s in data["scenarios"]), 1.0, places=2)
+        # 40 days of test data are too few for the learning engine's first forecast
+        data = json.loads(self.get("/api/scenarios?h=7")[1])
+        self.assertIn("error", data)
         self.assertNotIn("track_record", data)  # no forecast log given in this test: nothing recorded
+        tools = json.loads(self.get("/api/tools?tf=4h")[1])
+        for key in ("zones", "patterns", "regime", "volume_profile", "fibonacci"):
+            self.assertIn(key, tools)
+        for bad in ("/api/scenarios?h=5", "/api/tools?tf=2h", "/api/tools?until=yesterday"):
+            with self.assertRaises(HTTPError):
+                self.get(bad)
 
     def test_structure_api(self):
 

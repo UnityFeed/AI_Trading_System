@@ -120,6 +120,12 @@ body { height: 100vh; display: flex; flex-direction: column; }
 .toggles { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 14px; color: var(--text-secondary); }
 .toggles label { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
 .key { width: 14px; height: 3px; border-radius: 2px; display: inline-block; }
+.replay-bar { gap: 8px 14px; font-size: 14px; }
+.replay-bar .replay { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.replay-bar button, .replay-bar input[type=date], .replay-bar select { font: inherit; font-size: 13px; padding: 3px 8px;
+  border-radius: 8px; border: 1px solid var(--border); background: var(--card); color: var(--text-primary); cursor: pointer; }
+.replay-bar button[aria-pressed=true] { background: var(--text-primary); color: var(--card); }
+.replaying #chart-wrap { outline: 2px solid var(--warning); outline-offset: -2px; }
 .scenario-strip { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; padding: 6px 16px 8px;
   font-size: 13px; border-bottom: 1px solid var(--border); background: var(--card); }
 .scenario-strip:empty { display: none; }
@@ -151,7 +157,10 @@ CHART_SCRIPT = r"""
     ['volume', 'Volume', '--text-muted', true], ['rsi', 'RSI 14', '--rsi', true],
     ['macd', 'MACD', '--macd', true], ['atr', 'ATR 14', '--atr', false],
     ['structure', 'Structure (swings, BOS / CHoCH)', '--warning', true],
-    ['scenarios', 'Scenarios (next 30 days)', '--series-1', true]
+    ['levels', 'Support/resistance + Fibonacci', '--text-muted', true],
+    ['patterns', 'Patterns', '--warning', true],
+    ['profile', 'Volume profile', '--series-2', false],
+    ['scenarios', 'AI scenarios', '--series-1', true]
   ];
   function load(key, fallback) { try { var v = localStorage.getItem(key); return v === null ? fallback : JSON.parse(v); } catch (e) { return fallback; } }
   function save(key, value) { try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) {} }
@@ -169,7 +178,20 @@ CHART_SCRIPT = r"""
 
   var cache = {};   // timeframe -> {candles, indicators, markers, hasMore}
   var structures = {};  // timeframe -> market structure (/api/structure)
-  var scenarios = null;  // today's scenarios (/api/scenarios)
+  var scenarios = null;  // the AI's scenarios for now or the replay day (/api/scenarios)
+  var tools = {};  // timeframe|day -> chart tools (/api/tools)
+  var horizon = load('chart-horizon', 30);
+  var replay = null;  // replay day (unix seconds of 00:00 UTC) or null = now
+  var reveal = false, playing = null;
+  var DAY = 86400;
+  function limitTime() {  // last candle time shown: the replay day's close, plus the horizon when revealed
+    return replay === null ? Infinity : replay + DAY - 1 + (reveal ? horizon * DAY : 0);
+  }
+  function shown(c) {  // how many of the loaded candles are visible
+    var lim = limitTime(), n = c.candles.length;
+    while (n > 0 && c.candles[n - 1][0] > lim) n--;
+    return n;
+  }
   var chart = null, builtTf = null, series = {}, loading = false, markersLayer = null;
 
   function css(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
@@ -191,7 +213,7 @@ CHART_SCRIPT = r"""
   TOGGLES.forEach(function (t) {
     var label = document.createElement('label');
     var box = document.createElement('input'); box.type = 'checkbox'; box.checked = enabled[t[0]];
-    box.addEventListener('change', function () { enabled[t[0]] = box.checked; save('chart-settings', enabled); build(); renderScenarios(); });
+    box.addEventListener('change', function () { enabled[t[0]] = box.checked; save('chart-settings', enabled); build(); renderScenarios(); renderTools(); });
     var key = document.createElement('span'); key.className = 'key'; key.style.background = 'var(' + t[2] + ')';
     label.appendChild(box); label.appendChild(key); label.appendChild(document.createTextNode(t[1]));
     toggleBox.appendChild(label);
@@ -205,6 +227,36 @@ CHART_SCRIPT = r"""
     source = strategySelect.value; SelectedStrategy.set(source);
     cache = {}; state = null; show(); loadState();
   });
+
+  // AI forecast horizon and replay controls
+  var horizonSelect = document.getElementById('horizon');
+  horizonSelect.value = String(horizon);
+  horizonSelect.addEventListener('change', function () { horizon = Number(horizonSelect.value); save('chart-horizon', horizon); builtTf = null; loadScenarios(); });
+  document.getElementById('replay-date').addEventListener('change', function (e) {
+    if (!e.target.value) { setReplay(null); return; }
+    var day = Date.parse(e.target.value + 'T00:00:00Z') / 1000;
+    if (tf !== '1d') { tf = '1d'; tfBox.querySelectorAll('button').forEach(function (x) { x.setAttribute('aria-pressed', x.textContent === '1d' ? 'true' : 'false'); }); show(); }
+    setReplay(day);
+  });
+  function step(days) {
+    var c = cache[tf]; if (!c) return;
+    var latest = c.candles[c.candles.length - 1][0];
+    var base = replay === null ? latest : replay;
+    var next = Math.min(latest, base + days * DAY);
+    if (next >= latest && days > 0) { stopPlay(); setReplay(null); return; }
+    setReplay(next);
+  }
+  function stopPlay() { if (playing) { clearInterval(playing); playing = null; } document.getElementById('replay-play').setAttribute('aria-pressed', 'false'); }
+  document.getElementById('replay-back').addEventListener('click', function () { stopPlay(); step(-1); });
+  document.getElementById('replay-next').addEventListener('click', function () { stopPlay(); step(1); });
+  document.getElementById('replay-play').addEventListener('click', function (e) {
+    if (playing) { stopPlay(); return; }
+    if (replay === null) { var c = cache[tf]; if (c) setReplay(c.candles[Math.max(0, c.candles.length - 365)][0]); }
+    e.target.setAttribute('aria-pressed', 'true');
+    playing = setInterval(function () { step(1); }, 700);
+  });
+  document.getElementById('replay-reveal').addEventListener('change', function (e) { reveal = e.target.checked; builtTf = null; build(); renderScenarios(); });
+  document.getElementById('replay-now').addEventListener('click', function () { stopPlay(); setReplay(null); });
 
   function loadState() {
     var wanted = source;
@@ -240,7 +292,7 @@ CHART_SCRIPT = r"""
       b.appendChild(icon); b.appendChild(document.createTextNode(r.role)); b.title = r.rule; strip.appendChild(b);
     });
     var st = structures[tf];
-    if (st) part(tf + ' structure: ' + st.trend.toUpperCase() + (st.swing_high ? ' · swing high ' + fmt(st.swing_high, 0) : '') +
+    if (st && replay === null) part(tf + ' structure: ' + st.trend.toUpperCase() + (st.swing_high ? ' · swing high ' + fmt(st.swing_high, 0) : '') +
                  (st.swing_low ? ' · swing low ' + fmt(st.swing_low, 0) : ''), 'pill');
     if (state.signal) part(state.signal.action + ' SIGNAL at the next open' +
       (state.signal.target_pct !== undefined ? ' (to ' + state.signal.target_pct.toFixed(0) + '% BTC)' : ''), 'pill warn');
@@ -261,38 +313,93 @@ CHART_SCRIPT = r"""
       renderState();
     });
   }
-  function loadScenarios(again) {
-    fetch('/api/scenarios').then(function (r) { return r.json(); }).then(function (d) {
+  function loadScenarios() {
+    var url = '/api/scenarios?h=' + horizon + (replay !== null ? '&date=' + replay : '');
+    var asked = url;
+    fetch(url).then(function (r) { return r.json(); }).then(function (d) {
+      if (asked !== '/api/scenarios?h=' + horizon + (replay !== null ? '&date=' + replay : '')) return;
       var first = !scenarios;
       scenarios = d; renderScenarios();
-      if (first && cache[tf]) { builtTf = null; build(); }  // fresh view with room for the paths
-      // the model's skill is computed in the background: ask again until it is there
-      if (!d.model_skill && (again || 0) < 20) setTimeout(function () { loadScenarios((again || 0) + 1); }, 3000);
+      if (cache[tf]) { if (first) builtTf = null; build(); }
     });
   }
+  function loadTools() {
+    var key = tf + '|' + (replay === null ? 'now' : replay);
+    if (tools[key]) { renderTools(); if (cache[tf]) build(); return; }
+    fetch('/api/tools?tf=' + tf + (replay !== null ? '&until=' + replay : '')).then(function (r) { return r.json(); }).then(function (d) {
+      tools[key] = d; renderTools();
+      if (cache[tf]) build();
+    });
+  }
+  function currentTools() { return tools[tf + '|' + (replay === null ? 'now' : replay)]; }
+  function pct(v) { return Math.round(v * 100) + '%'; }
   function renderScenarios() {
     var box = document.getElementById('scenarios'); box.textContent = '';
-    if (!scenarios || !enabled.scenarios || !scenarios.scenarios) return;
+    document.body.classList.toggle('replaying', replay !== null);
+    if (!scenarios || !enabled.scenarios) return;
     function el(tag, text, cls) { var e = document.createElement(tag); e.textContent = text; if (cls) e.className = cls; box.appendChild(e); return e; }
-    el('strong', 'Next ' + scenarios.horizon_days + ' days from the ' + scenarios.candle_time.slice(0, 10) + ' close:');
+    if (scenarios.error) { el('span', 'AI forecast: ' + scenarios.error, 'muted'); return; }
+    el('strong', (replay !== null ? 'REPLAY · ' : '') + 'AI forecast, next ' + scenarios.horizon_days + ' days from the ' + scenarios.candle_time.slice(0, 10) + ' close:');
     scenarios.scenarios.forEach(function (s) {
       var name = {bull: 'Bull', bear: 'Bear', range: 'Range'}[s.kind];
       var where = s.kind === 'range' ? ' (' + fmt(scenarios.stop, 0) + ' - ' + fmt(scenarios.target, 0) + ')' : ' to ' + fmt(s.level, 0) + ' in ~' + s.typical_days + ' d';
-      var e = el('span', '', 'sc ' + s.kind); var b = document.createElement('b'); b.textContent = name + ' ' + Math.round(s.probability * 100) + '%';
+      var e = el('span', '', 'sc ' + s.kind); var b = document.createElement('b'); b.textContent = name + ' ' + pct(s.probability);
       e.appendChild(b); e.appendChild(document.createTextNode(where)); e.title = s.meaning + '. Proven wrong by ' + s.proven_wrong_by + '.';
     });
-    var sk = scenarios.model_skill;
-    var skill = !sk ? 'model skill: calculating...' : (sk.error ? 'model skill: unknown' :
-      'model skill vs base rate since ' + sk.from_year + ': ' + (sk.brier_skill >= 0 ? '+' : '') + (sk.brier_skill * 100).toFixed(1) + '%' +
-      (Math.abs(sk.brier_skill) < 0.02 ? ' (about none: treat as rough odds)' : ''));
-    el('span', 'based on ' + scenarios.cases + ' similar past days · ' + skill, 'muted');
+    if (scenarios.outcome && (replay === null || reveal)) {
+      var top = scenarios.scenarios[0].kind, o = scenarios.outcome;
+      el('span', 'What happened: ' + o.kind.toUpperCase() + ' after ' + o.days + ' d ' + (o.kind === top ? '(top scenario right)' : '(top scenario was ' + top + ')'), 'sc ' + o.kind);
+    } else if (scenarios.outcome === null && replay !== null && reveal) {
+      el('span', 'What happened: not decided yet', 'muted');
+    }
+    var w = scenarios.weights || {};
+    el('span', 'AI trusts: ' + Object.keys(w).sort(function (a, b) { return w[b] - w[a]; }).map(function (k) { return k + ' ' + pct(w[k]); }).join(' · '), 'muted');
+    var sc = scenarios.score_so_far || {};
+    el('span', sc.scored ? 'its score up to this day: ' + (sc.brier_skill >= 0 ? '+' : '') + (sc.brier_skill * 100).toFixed(1) + '% vs the base rate, top scenario right ' + pct(sc.top_hit_rate) + ' of ' + sc.scored.toLocaleString() + ' forecasts'
+                         : 'no scored forecasts yet', 'muted');
     var tr = scenarios.track_record;
-    if (tr) el('span', tr.scored ? 'logged forecasts scored: ' + tr.scored + ', top scenario right ' + Math.round(tr.top_scenario_hit_rate * 100) + '%'
-                                 : 'forecast log: started, none scored yet', 'muted');
+    if (tr && replay === null) el('span', tr.scored ? 'live log: ' + tr.scored + ' scored, top right ' + pct(tr.top_scenario_hit_rate) : 'live log: started, none scored yet', 'muted');
+  }
+  function renderTools() {
+    var box = document.getElementById('tools-strip'); box.textContent = '';
+    var t = currentTools();
+    if (!t || t.error) return;
+    function el(text, cls) { var e = document.createElement('span'); e.textContent = text; if (cls) e.className = cls; box.appendChild(e); return e; }
+    el('Regime (' + tf + '): ' + t.regime + (t.adx !== null ? ' · ADX ' + t.adx : ''));
+    if (enabled.patterns) {
+      var live = t.patterns.filter(function (p) { return p.status === 'candidate' || p.status === 'confirmed'; });
+      var rec = t.pattern_track_record || {};
+      el(live.length ? 'Patterns: ' + live.map(function (p) {
+        var r = rec[p.kind]; return p.kind + ' (' + p.status + (r && r.hit_rate !== null ? ', hit ' + pct(r.hit_rate) + ' in the past' : '') + ')';
+      }).join(', ') : 'Patterns: none active', 'muted');
+    }
+    if (enabled.profile && t.volume_profile) el('Volume profile ' + t.volume_profile.days + ' d (estimate): POC ' + fmt(t.volume_profile.poc, 0) +
+      ', value area ' + fmt(t.volume_profile.val, 0) + ' - ' + fmt(t.volume_profile.vah, 0), 'muted');
+  }
+  function ensureLoaded(time, done) {  // load older chunks until the replay day is in the cache
+    var c = cache[tf];
+    if (!c || c.candles[0][0] <= time || !c.hasMore) { done(); return; }
+    fetchChunk(c.candles[0][0]).then(function (d) {
+      if (!d.candles.length) { c.hasMore = false; done(); return; }
+      c.candles = d.candles.concat(c.candles);
+      Object.keys(c.indicators).forEach(function (k) { c.indicators[k] = d.indicators[k].concat(c.indicators[k]); });
+      c.hasMore = d.has_more;
+      ensureLoaded(time, done);
+    });
+  }
+  function setReplay(day) {
+    replay = day;
+    var input = document.getElementById('replay-date');
+    input.value = day === null ? '' : new Date(day * 1000).toISOString().slice(0, 10);
+    builtTf = null;  // a fresh view around the replay day
+    renderState();
+    var go = function () { loadScenarios(); loadTools(); };
+    if (day === null) go(); else ensureLoaded(day, go);
   }
   function show() {
     loadStructure();
     if (!scenarios) loadScenarios();
+    loadTools();
     if (cache[tf]) { build(); return; }
     wrap.textContent = 'Loading ' + tf + ' candles...';
     fetchChunk(null).then(function (d) {
@@ -378,7 +485,7 @@ CHART_SCRIPT = r"""
     fill();
     // Market structure: the last swing high and low (what has to break next).
     var stl = structures[tf];
-    if (enabled.structure && stl) {
+    if (enabled.structure && stl && replay === null) {  // today's levels: not shown while replaying the past
       if (stl.swing_high) series.candles.createPriceLine({price: stl.swing_high, color: css('--up'), lineWidth: 1,
         lineStyle: LWC.LineStyle.Dotted, axisLabelVisible: true, title: 'swing high'});
       if (stl.swing_low) series.candles.createPriceLine({price: stl.swing_low, color: css('--down'), lineWidth: 1,
@@ -386,8 +493,8 @@ CHART_SCRIPT = r"""
     }
     // Scenarios: dashed paths from the last close to each scenario's level, on the daily chart;
     // target / stop lines on the other timeframes.
-    if (enabled.scenarios && scenarios && scenarios.scenarios) {
-      var lastTime = c.candles[c.candles.length - 1][0], lastClose = c.candles[c.candles.length - 1][4];
+    if (enabled.scenarios && scenarios && scenarios.scenarios && !scenarios.error) {
+      var lastTime = scenarios.time, lastClose = scenarios.close;
       var colors = {bull: css('--up'), bear: css('--down'), range: css('--text-muted')};
       if (tf === '1d') {
         scenarios.scenarios.forEach(function (s) {
@@ -412,8 +519,44 @@ CHART_SCRIPT = r"""
           lineStyle: LWC.LineStyle.Dashed, axisLabelVisible: true, title: 'bear target'});
       }
     }
+    // Chart tools as known on the shown day: support/resistance, Fibonacci, volume profile, patterns.
+    var tl = currentTools();
+    if (tl && !tl.error) {
+      if (enabled.levels) {
+        tl.zones.forEach(function (z) {
+          series.candles.createPriceLine({price: (z.low + z.high) / 2, color: z.kind === 'support' ? css('--up') : css('--down'),
+            lineWidth: z.touches >= 4 ? 2 : 1, lineStyle: LWC.LineStyle.Solid, axisLabelVisible: false,
+            title: (z.kind === 'support' ? 'S' : 'R') + ' x' + z.touches});
+        });
+        if (tl.fibonacci) tl.fibonacci.levels.filter(function (f) { return ['1.414', '2', '2.618'].indexOf(f.name) < 0; }).forEach(function (f) {
+          series.candles.createPriceLine({price: f.price, color: css('--text-muted'), lineWidth: 1,
+            lineStyle: LWC.LineStyle.SparseDotted, axisLabelVisible: false, title: 'fib ' + f.name});
+        });
+      }
+      if (enabled.profile && tl.volume_profile) {
+        var vp = tl.volume_profile;
+        series.candles.createPriceLine({price: vp.poc, color: css('--series-2'), lineWidth: 2, lineStyle: LWC.LineStyle.Solid, axisLabelVisible: true, title: 'POC'});
+        series.candles.createPriceLine({price: vp.vah, color: css('--series-2'), lineWidth: 1, lineStyle: LWC.LineStyle.Dotted, axisLabelVisible: false, title: 'VAH'});
+        series.candles.createPriceLine({price: vp.val, color: css('--series-2'), lineWidth: 1, lineStyle: LWC.LineStyle.Dotted, axisLabelVisible: false, title: 'VAL'});
+      }
+      if (enabled.patterns) {
+        var pc = {bull: css('--up'), bear: css('--down'), either: css('--warning')};
+        tl.patterns.forEach(function (p) {
+          var color = pc[p.direction] || css('--warning');
+          var outline = chart.addSeries(LWC.LineSeries, {color: color, lineWidth: 2, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false});
+          outline.setData(p.points.map(function (q) { return {time: q.time, value: q.price}; }));
+          [p.neckline, p.lower].forEach(function (seg) {
+            if (!seg || seg[1].time <= seg[0].time) return;
+            var ln = chart.addSeries(LWC.LineSeries, {color: color, lineWidth: 1, lineStyle: LWC.LineStyle.Dashed, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false});
+            ln.setData(seg.map(function (q) { return {time: q.time, value: q.price}; }));
+          });
+          if (p.status === 'confirmed' && p.target) series.candles.createPriceLine({price: p.target, color: color, lineWidth: 1,
+            lineStyle: LWC.LineStyle.Dashed, axisLabelVisible: true, title: p.kind + ' target'});
+        });
+      }
+    }
     // An open trade: dashed lines at the buy price and the stop.
-    if (enabled.trades && state && state.position) {
+    if (enabled.trades && state && state.position && replay === null) {
       var pos = state.position;
       series.candles.createPriceLine({price: pos.entry_price, color: css('--series-1'), lineWidth: 1,
         lineStyle: LWC.LineStyle.Dashed, axisLabelVisible: true, title: 'bought'});
@@ -425,9 +568,10 @@ CHART_SCRIPT = r"""
     if (panes[0]) panes[0].setStretchFactor(small.length ? 3.2 : 1);
     small.forEach(function (i) { if (panes[i]) panes[i].setStretchFactor(i === 1 && enabled.volume ? 0.6 : 1); });
 
+    var n = shown(c);
     if (range) chart.timeScale().setVisibleLogicalRange(range);
-    else chart.timeScale().setVisibleLogicalRange({from: c.candles.length - (tf === '1d' ? (enabled.scenarios && scenarios ? 150 : 365) : 300),
-      to: c.candles.length + (tf === '1d' && enabled.scenarios && scenarios ? 40 : 5)});  // room for the scenario paths
+    else chart.timeScale().setVisibleLogicalRange({from: n - (tf === '1d' ? (enabled.scenarios && scenarios ? 150 : 365) : 300),
+      to: n + (tf === '1d' && enabled.scenarios && scenarios ? horizon + 10 : 5)});  // room for the scenario paths
 
     chart.timeScale().subscribeVisibleLogicalRangeChange(function (r) { if (r && r.from < 50) loadOlder(); });
     chart.subscribeCrosshairMove(readout);
@@ -436,44 +580,45 @@ CHART_SCRIPT = r"""
 
   function fill() {
     var c = cache[tf], ind = c.indicators;
+    var cs = c.candles.slice(0, shown(c)), lim = limitTime();  // replay: nothing after the shown day
     var up = css('--up'), down = css('--down'), filled = css('--filled');
-    var candleData = c.candles.map(function (k) {
+    var candleData = cs.map(function (k) {
       var d = {time: k[0], open: k[1], high: k[2], low: k[3], close: k[4]};
       if (k[6]) { d.color = filled; d.wickColor = filled; }
       return d;
     });
     // Empty future days, so the scenario paths get real width (the chart spaces bars by count, not by date).
-    if (tf === '1d' && enabled.scenarios && scenarios && scenarios.horizon_days) {
-      var lastDay = c.candles[c.candles.length - 1][0];
-      for (var k = 1; k <= scenarios.horizon_days + 5; k++) candleData.push({time: lastDay + k * 86400});
+    if (tf === '1d' && enabled.scenarios && scenarios && scenarios.horizon_days && cs.length) {
+      var lastDay = cs[cs.length - 1][0], until = (scenarios.time || lastDay) + (scenarios.horizon_days + 5) * DAY;
+      for (var day = lastDay + DAY; day <= until; day += DAY) candleData.push({time: day});
     }
     series.candles.setData(candleData);
     ['ema_20', 'ema_50', 'ema_200', 'bb_upper', 'bb_middle', 'bb_lower', 'rsi_14', 'macd', 'macd_signal', 'atr_14'].forEach(function (name) {
       if (!series[name]) return;
       var data = [];
-      c.candles.forEach(function (k, i) { var v = ind[name][i]; if (v !== null) data.push({time: k[0], value: v}); });
+      cs.forEach(function (k, i) { var v = ind[name][i]; if (v !== null) data.push({time: k[0], value: v}); });
       series[name].setData(data);
     });
     if (series.macd_hist) {
       var data = [];
-      c.candles.forEach(function (k, i) { var v = ind.macd_hist[i]; if (v !== null) data.push({time: k[0], value: v, color: v >= 0 ? up : down}); });
+      cs.forEach(function (k, i) { var v = ind.macd_hist[i]; if (v !== null) data.push({time: k[0], value: v, color: v >= 0 ? up : down}); });
       series.macd_hist.setData(data);
     }
     if (series.volume) {
       var upVol = css('--up'), downVol = css('--down');
-      series.volume.setData(c.candles.map(function (k) {
+      series.volume.setData(cs.map(function (k) {
         return {time: k[0], value: k[5], color: (k[4] >= k[1] ? upVol : downVol) + '80'};
       }));
     }
     var first = c.candles[0][0], ink = css('--text-primary');
     var marks = [];
     if (enabled.trades) {
-      marks = c.markers.filter(function (m) { return m.time >= first; }).map(function (m) {
+      marks = c.markers.filter(function (m) { return m.time >= first && m.time <= lim; }).map(function (m) {
         return m.side === 'buy'
           ? {time: m.time, position: 'belowBar', shape: 'arrowUp', color: ink, text: m.label || 'B'}
           : {time: m.time, position: 'aboveBar', shape: 'arrowDown', color: ink, text: m.label || 'S'};
       });
-      if (state && state.signal) {
+      if (state && state.signal && replay === null) {
         var lastTime = c.candles[c.candles.length - 1][0];
         marks.push(state.signal.action === 'BUY'
           ? {time: lastTime, position: 'belowBar', shape: 'circle', color: css('--warning'), text: 'BUY signal'}
@@ -483,17 +628,27 @@ CHART_SCRIPT = r"""
     var st = structures[tf];
     if (enabled.structure && st) {
       var muted = css('--text-muted'), up = css('--up'), down = css('--down');
+      var known = replay === null ? Infinity : replay + DAY;  // swings confirmed by the replay day's close
       st.pivots.forEach(function (p) {
-        if (p.time < first) return;
+        if (p.time < first || Date.parse(p.confirmed) / 1000 > known) return;
         marks.push(p.kind === 'high'
           ? {time: p.time, position: 'aboveBar', shape: 'circle', size: 0.5, color: muted, text: p.label || 'H'}
           : {time: p.time, position: 'belowBar', shape: 'circle', size: 0.5, color: muted, text: p.label || 'L'});
       });
       st.events.forEach(function (e) {
-        if (e.time < first || e.kind === 'sweep') return;
+        if (e.time < first || e.kind === 'sweep' || e.time > lim) return;
         marks.push(e.direction === 'up'
           ? {time: e.time, position: 'belowBar', shape: 'arrowUp', color: up, text: e.kind}
           : {time: e.time, position: 'aboveBar', shape: 'arrowDown', color: down, text: e.kind});
+      });
+    }
+    var tl = currentTools();
+    if (enabled.patterns && tl && !tl.error) {
+      tl.patterns.forEach(function (p) {
+        if (p.label_time < first) return;
+        var bullish = p.direction === 'bull', color = bullish ? up : (p.direction === 'bear' ? down : css('--warning'));
+        marks.push({time: p.label_time, position: bullish ? 'belowBar' : 'aboveBar', shape: 'square', size: 0.6, color: color,
+                    text: p.kind + ' (' + p.status + ')'});
       });
     }
     marks.sort(function (a, b) { return a.time - b.time; });
@@ -506,7 +661,7 @@ CHART_SCRIPT = r"""
   function readout(param) {
     var c = cache[tf];
     if (!c || !c.candles.length) return;
-    var i = c.candles.length - 1;
+    var i = Math.max(0, shown(c) - 1);
     if (param && param.time !== undefined) {
       var lo = 0, hi = c.candles.length - 1;
       while (lo < hi) { var mid = (lo + hi) >> 1; if (c.candles[mid][0] < param.time) lo = mid + 1; else hi = mid; }
@@ -550,7 +705,16 @@ def chart_page() -> str:
         + "<div class='toolbar'><div class='seg' id='tf' role='group' aria-label='Timeframe'></div>"
         "<div class='toggles' id='toggles'></div>"
         "<label class='secondary' style='font-size:14px'>Strategy: <select id='strategy'></select></label></div>"
+        "<div class='toolbar replay-bar'><label>AI forecast <select id='horizon'><option value='7'>7 days</option>"
+        "<option value='14'>14 days</option><option value='30'>30 days</option></select></label>"
+        "<span class='replay'>Replay from <input type='date' id='replay-date' aria-label='Replay date'>"
+        "<button type='button' id='replay-back' aria-label='One day back'>&#9664; day</button>"
+        "<button type='button' id='replay-next' aria-label='One day forward'>day &#9654;</button>"
+        "<button type='button' id='replay-play'>&#9654; play</button>"
+        "<label><input type='checkbox' id='replay-reveal'> show what happened</label>"
+        "<button type='button' id='replay-now'>back to now</button></span></div>"
         "<div class='state-strip' id='state'></div><div class='scenario-strip' id='scenarios'></div>"
+        "<div class='scenario-strip' id='tools-strip'></div>"
         "<div id='chart-wrap'><div id='readout'></div><div id='chart'></div></div>"
         "<div class='note'>Scroll or drag to move back in time (older candles load automatically), "
         "pinch or mouse wheel to zoom. Grey candles contain hours filled in from another exchange "

@@ -129,6 +129,14 @@ their own `database/predictions.db` (phase 4).
   is logged once per daily candle in `database/predictions.db` (phase 4) and
   scored when decided. First result (test DB): analog skill only +0.7% over
   the base rate; treat the chances as rough odds.
+- Learning engine + chart tools + replay (23 Nov 2026): the Chart's AI
+  scenarios now come from `learner.py` (day-by-day replay that learns from
+  every outcome; horizons 7/14/30, select "AI forecast"); toggles
+  "Support/resistance + Fibonacci", "Patterns", "Volume profile"; replay bar
+  (date, step, play, show what happened, back to now). Report card:
+  `python -m scripts.run_learning_replay` (skill per horizon, experts, blend
+  weights, learning curve, pattern track record). Test DB: 7 days +1.1% vs the
+  base rate, 14 days +0.2%, 30 days -0.5%.
 
 ## Architecture (keep it; do not redesign without a clear reason)
 - `src/data_collection/`: `MarketData` dataclass, `data_validator`, `MarketDataProvider`
@@ -228,7 +236,12 @@ their own `database/predictions.db` (phase 4).
   `scenarios.py` (models base/structure/analog, `walk_forward`, `score`,
   `current_forecast`), `engine.py` (`HORIZON`, `MODEL`, `MODEL_VERSION`,
   `engine_context`, `todays_scenarios` -> paths, targets, invalidation),
-  `forecast_log.py` (`ForecastLog`: immutable forecasts + outcomes)
+  `forecast_log.py` (`ForecastLog`: immutable forecasts + outcomes),
+  `levels.py` (S/R zones, Fibonacci, ADX, regime), `volume_profile.py`,
+  `patterns.py` (`swings_known_over_time`, `detect_patterns` with life cycle,
+  `track_record`, `pattern_features`), `learner.py` (`build_inputs`, `replay`:
+  experts + Hedge blend, `learning_curve`), `service.py` (`EngineService`:
+  scenarios/tools for now or any past day, used by the app)
 - `src/risk_management/`, `src/execution/`: empty packages (not started)
 - `scripts/`: update, integrity, comparison, anomaly, research and app tools;
   `scripts/archive/` holds finished one-time jobs (initial imports incl. the
