@@ -40,6 +40,27 @@ cases, target zone and invalidation level, updated every day, and every
 forecast is stored and scored so the owner can see whether it works.
 
 ## Status
+- 23 Nov 2026, phases 3-5 BUILT (test DB; owner to confirm on the real DB):
+  - Phase 3 `scenarios.py` + `engine.py` (MODEL = analog, horizon 30 days,
+    barriers 1x typical move): models base / structure / analog, walk-forward
+    2017-now, 3,581 days. Skill vs the base rate: analog Brier +0.7%
+    (log loss +0.1%), structure -0.4%: direction 30 days ahead is barely
+    predictable; the range probability is the best-calibrated part (analog
+    said 0.54 -> 0.58 happened, 0.63 -> 0.68). Gate "Brier skill > 0": only
+    just passed; the chart shows the skill next to every forecast.
+  - Phase 4 `forecast_log.py`: `database/predictions.db`, one forecast per
+    daily candle and model version, never overwritten; outcomes added when
+    decided; track record (scored count, Brier, log loss, top-scenario hit
+    rate). Recorded by the app whenever the scenarios are computed.
+  - Phase 5 chart: toggle "Scenarios (next 30 days)": strip with the three
+    chances, targets, typical days, cases, model skill and track record;
+    on 1d dashed paths from the last close to the bull/bear targets and a
+    dotted range band, with 35 empty future days; target lines on other
+    timeframes. API `/api/scenarios`.
+  - Next ideas (owner to choose): historical replay of past forecasts on the
+    chart; improve the model (direction is near-random; range/volatility is
+    more predictable, so a "big move vs range" view may be more useful);
+    shorter horizons (7/14 days) for watching live charts.
 - 23 Nov 2026 (test DB; owner to confirm on the real DB):
   - Structure on the chart: toggle "Structure" (swing labels HH/HL/LH/LL,
     BOS/CHoCH arrows, dotted last swing high/low lines, trend in the status

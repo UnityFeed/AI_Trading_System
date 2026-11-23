@@ -18,6 +18,7 @@ from src.app.server import AppState, serve
 from src.data_collection.external_data import ExternalDataStore
 from src.data_collection.market_data_repository import MarketDataRepository
 from src.paper_trading.accounts import open_extra_accounts
+from src.predictive_engine.forecast_log import ForecastLog
 from src.paper_trading.store import PaperTradingStore
 
 
@@ -47,6 +48,7 @@ def main() -> None:
         PaperTradingStore(args.paper_db) if args.paper_db else PaperTradingStore(),
         ExternalDataStore(args.external_db) if args.external_db else ExternalDataStore(),
         open_extra_accounts(args.paper_db.parent if args.paper_db else None),
+        ForecastLog(args.paper_db.parent / "predictions.db") if args.paper_db else ForecastLog(),
     )
     server = serve(state, args.port)
     print(f"App running at {url}")

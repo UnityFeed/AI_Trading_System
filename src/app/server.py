@@ -10,6 +10,7 @@ not reachable from other machines) that serves
   /api/strategies, /api/backtest, /api/strategy-state   strategy data
   /api/compare   key numbers of every strategy side by side
   /api/structure market structure of a timeframe (predictive engine, phase 1)
+  /api/scenarios today's bull / bear / range scenarios (predictive engine)
   /api/status    progress of a running job
   /api/run       POST: start the daily routine (update data + paper trader)
 
@@ -30,6 +31,9 @@ from src.app.strategy_page import strategy_page
 from src.backtesting.engine import CostSettings, MarginSettings
 from src.backtesting.exposure import MissingExternalData
 from src.backtesting.market import build_market
+from src.predictive_engine import engine as scenario_engine
+from src.predictive_engine.forecast_log import ForecastLog
+from src.predictive_engine.scenarios import score as score_forecasts, walk_forward as forecast_walk_forward
 from src.predictive_engine.structure import analyse as analyse_structure
 from src.backtesting.report import start_years, strategy_report, strategy_state, trade_markers_from_report
 from src.strategies.registry import ACTIVE_STRATEGY_ID, STRATEGIES, get_strategy
@@ -56,10 +60,14 @@ MAX_CHUNK = 5000
 class AppState:
 
     def __init__(self, repository: MarketDataRepository, store: PaperTradingStore,
-                 external_store: ExternalDataStore | None = None, extra_accounts=()):
+                 external_store: ExternalDataStore | None = None, extra_accounts=(),
+                 forecast_log: ForecastLog | None = None):
         self.repository = repository
         self.store = store
         self.extra_accounts = list(extra_accounts)  # (ExtraAccount, PaperTradingStore)
+        self.forecast_log = forecast_log  # predictive engine: forecasts are recorded here (None = not recorded)
+        self.model_skill = None  # walk-forward skill of the scenario model, computed in the background
+        self.skill_started = False
         self.external_store = external_store
         self.job_lock = threading.Lock()
         self.data_lock = threading.Lock()
@@ -87,6 +95,8 @@ class AppState:
             self.reports = {}
             self.states = {}
             self.structures = {}
+            self.scenario_context = None
+            self.scenarios = None
 
     def _market(self, timeframe: str):
         """Backtest market for one timeframe (call with data_lock held)."""
@@ -128,6 +138,40 @@ class AppState:
                     ],
                 }
             return self.structures[timeframe]
+
+    def scenario_state(self) -> dict:
+        """Today's scenarios (predictive engine), recorded in the forecast log once per candle."""
+        with self.data_lock:
+            if self.scenarios is None:
+                market = self._market("1d")
+                self.scenario_context = scenario_engine.engine_context(market)
+                self.scenarios = scenario_engine.todays_scenarios(market, self.scenario_context).as_dict()
+                if self.forecast_log is not None:
+                    self.forecast_log.record(self.scenarios)
+                    self.forecast_log.score_pending(market.candles)
+            payload = dict(self.scenarios)
+            ctx = self.scenario_context
+        if not self.skill_started:
+            self.skill_started = True
+            threading.Thread(target=self._compute_skill, args=(ctx,), daemon=True).start()
+        payload["model_skill"] = self.model_skill
+        if self.forecast_log is not None:
+            payload["track_record"] = self.forecast_log.track_record()
+            payload["recent_forecasts"] = self.forecast_log.history(10)
+        return payload
+
+    def _compute_skill(self, ctx) -> None:
+        """Walk-forward skill of the chart's model vs the base rate (shown next to every forecast)."""
+        try:
+            base = score_forecasts(ctx, forecast_walk_forward(ctx, "base"))
+            model = score_forecasts(ctx, forecast_walk_forward(ctx, scenario_engine.MODEL))
+            self.model_skill = {
+                "model": scenario_engine.MODEL, "days": model.n, "from_year": 2017,
+                "brier_skill": round(1 - model.brier / base.brier, 4),
+                "log_loss_skill": round(1 - model.log_loss / base.log_loss, 4),
+            }
+        except Exception as error:  # shown as unknown, never breaks the app
+            self.model_skill = {"error": str(error)}
 
     def overview(self) -> str:
         with self.data_lock:
@@ -285,6 +329,9 @@ def make_handler(state: AppState):
                     return self._json(state.report(strategy_id, fee, leverage, start_year))
                 except MissingExternalData as error:
                     return self._json({"error": str(error)}, 409)
+
+            if url.path == "/api/scenarios":
+                return self._json(state.scenario_state())
 
             if url.path == "/api/structure":
                 timeframe = query.get("tf", ["1d"])[0]

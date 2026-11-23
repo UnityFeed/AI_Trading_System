@@ -209,6 +209,13 @@ class TestServer(unittest.TestCase):
         with self.assertRaises(HTTPError):
             self.get("/api/compare?fee=0.1")
 
+    def test_scenarios_api(self):
+
+        data = json.loads(self.get("/api/scenarios")[1])
+        self.assertEqual(len(data["scenarios"]), 3)
+        self.assertAlmostEqual(sum(s["probability"] for s in data["scenarios"]), 1.0, places=2)
+        self.assertNotIn("track_record", data)  # no forecast log given in this test: nothing recorded
+
     def test_structure_api(self):
 
         data = json.loads(self.get("/api/structure?tf=4h")[1])

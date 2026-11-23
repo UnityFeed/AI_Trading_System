@@ -122,6 +122,13 @@ their own `database/predictions.db` (phase 4).
 - Scenario outcomes (phase 2): `python -m scripts.run_scenario_outcomes`
   (`--horizon 30 --k 1.0`): bull/bear/range base rates overall, per year,
   per daily/weekly structure, and for today's situation.
+- Scenario models (phase 3): `python -m scripts.run_scenario_models`
+  (walk-forward skill of base/structure/analog, calibration, today's
+  scenarios; ~1 min). Chart toggle "Scenarios (next 30 days)" (phase 5) shows
+  the chances, targets, cases and model skill; every forecast the app makes
+  is logged once per daily candle in `database/predictions.db` (phase 4) and
+  scored when decided. First result (test DB): analog skill only +0.7% over
+  the base rate; treat the chances as rough odds.
 
 ## Architecture (keep it; do not redesign without a clear reason)
 - `src/data_collection/`: `MarketData` dataclass, `data_validator`, `MarketDataProvider`
@@ -217,7 +224,11 @@ their own `database/predictions.db` (phase 4).
   `analyse`: alternating labelled swings HH/LH/HL/LL, trend per candle,
   BOS/CHoCH/sweep events; all causal, truncation-tested), `outcomes.py`
   (`outcomes`: bull/bear/range first-barrier labels on daily closes,
-  volatility-scaled barriers, decided index; `BaseRates`, `base_rates_by`)
+  volatility-scaled barriers, decided index; `BaseRates`, `base_rates_by`),
+  `scenarios.py` (models base/structure/analog, `walk_forward`, `score`,
+  `current_forecast`), `engine.py` (`HORIZON`, `MODEL`, `MODEL_VERSION`,
+  `engine_context`, `todays_scenarios` -> paths, targets, invalidation),
+  `forecast_log.py` (`ForecastLog`: immutable forecasts + outcomes)
 - `src/risk_management/`, `src/execution/`: empty packages (not started)
 - `scripts/`: update, integrity, comparison, anomaly, research and app tools;
   `scripts/archive/` holds finished one-time jobs (initial imports incl. the

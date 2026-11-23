@@ -120,6 +120,12 @@ body { height: 100vh; display: flex; flex-direction: column; }
 .toggles { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 14px; color: var(--text-secondary); }
 .toggles label { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
 .key { width: 14px; height: 3px; border-radius: 2px; display: inline-block; }
+.scenario-strip { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; padding: 6px 16px 8px;
+  font-size: 13px; border-bottom: 1px solid var(--border); background: var(--card); }
+.scenario-strip:empty { display: none; }
+.scenario-strip .sc { font-variant-numeric: tabular-nums; }
+.scenario-strip .sc b { font-weight: 650; }
+.scenario-strip .bull { color: var(--up); } .scenario-strip .bear { color: var(--down); }
 .state-strip { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; padding: 8px 16px; font-size: 14px;
   border-bottom: 1px solid var(--border); background: var(--card); min-height: 40px; }
 .state-strip .badge { font-weight: 500; font-size: 13px; }
@@ -144,7 +150,8 @@ CHART_SCRIPT = r"""
     ['bb', 'Bollinger', '--text-muted', false], ['trades', 'Trades (B = buy, S = sell)', '--text-primary', true],
     ['volume', 'Volume', '--text-muted', true], ['rsi', 'RSI 14', '--rsi', true],
     ['macd', 'MACD', '--macd', true], ['atr', 'ATR 14', '--atr', false],
-    ['structure', 'Structure (swings, BOS / CHoCH)', '--warning', true]
+    ['structure', 'Structure (swings, BOS / CHoCH)', '--warning', true],
+    ['scenarios', 'Scenarios (next 30 days)', '--series-1', true]
   ];
   function load(key, fallback) { try { var v = localStorage.getItem(key); return v === null ? fallback : JSON.parse(v); } catch (e) { return fallback; } }
   function save(key, value) { try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) {} }
@@ -162,6 +169,7 @@ CHART_SCRIPT = r"""
 
   var cache = {};   // timeframe -> {candles, indicators, markers, hasMore}
   var structures = {};  // timeframe -> market structure (/api/structure)
+  var scenarios = null;  // today's scenarios (/api/scenarios)
   var chart = null, builtTf = null, series = {}, loading = false, markersLayer = null;
 
   function css(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
@@ -183,7 +191,7 @@ CHART_SCRIPT = r"""
   TOGGLES.forEach(function (t) {
     var label = document.createElement('label');
     var box = document.createElement('input'); box.type = 'checkbox'; box.checked = enabled[t[0]];
-    box.addEventListener('change', function () { enabled[t[0]] = box.checked; save('chart-settings', enabled); build(); });
+    box.addEventListener('change', function () { enabled[t[0]] = box.checked; save('chart-settings', enabled); build(); renderScenarios(); });
     var key = document.createElement('span'); key.className = 'key'; key.style.background = 'var(' + t[2] + ')';
     label.appendChild(box); label.appendChild(key); label.appendChild(document.createTextNode(t[1]));
     toggleBox.appendChild(label);
@@ -253,8 +261,38 @@ CHART_SCRIPT = r"""
       renderState();
     });
   }
+  function loadScenarios(again) {
+    fetch('/api/scenarios').then(function (r) { return r.json(); }).then(function (d) {
+      var first = !scenarios;
+      scenarios = d; renderScenarios();
+      if (first && cache[tf]) { builtTf = null; build(); }  // fresh view with room for the paths
+      // the model's skill is computed in the background: ask again until it is there
+      if (!d.model_skill && (again || 0) < 20) setTimeout(function () { loadScenarios((again || 0) + 1); }, 3000);
+    });
+  }
+  function renderScenarios() {
+    var box = document.getElementById('scenarios'); box.textContent = '';
+    if (!scenarios || !enabled.scenarios || !scenarios.scenarios) return;
+    function el(tag, text, cls) { var e = document.createElement(tag); e.textContent = text; if (cls) e.className = cls; box.appendChild(e); return e; }
+    el('strong', 'Next ' + scenarios.horizon_days + ' days from the ' + scenarios.candle_time.slice(0, 10) + ' close:');
+    scenarios.scenarios.forEach(function (s) {
+      var name = {bull: 'Bull', bear: 'Bear', range: 'Range'}[s.kind];
+      var where = s.kind === 'range' ? ' (' + fmt(scenarios.stop, 0) + ' - ' + fmt(scenarios.target, 0) + ')' : ' to ' + fmt(s.level, 0) + ' in ~' + s.typical_days + ' d';
+      var e = el('span', '', 'sc ' + s.kind); var b = document.createElement('b'); b.textContent = name + ' ' + Math.round(s.probability * 100) + '%';
+      e.appendChild(b); e.appendChild(document.createTextNode(where)); e.title = s.meaning + '. Proven wrong by ' + s.proven_wrong_by + '.';
+    });
+    var sk = scenarios.model_skill;
+    var skill = !sk ? 'model skill: calculating...' : (sk.error ? 'model skill: unknown' :
+      'model skill vs base rate since ' + sk.from_year + ': ' + (sk.brier_skill >= 0 ? '+' : '') + (sk.brier_skill * 100).toFixed(1) + '%' +
+      (Math.abs(sk.brier_skill) < 0.02 ? ' (about none: treat as rough odds)' : ''));
+    el('span', 'based on ' + scenarios.cases + ' similar past days · ' + skill, 'muted');
+    var tr = scenarios.track_record;
+    if (tr) el('span', tr.scored ? 'logged forecasts scored: ' + tr.scored + ', top scenario right ' + Math.round(tr.top_scenario_hit_rate * 100) + '%'
+                                 : 'forecast log: started, none scored yet', 'muted');
+  }
   function show() {
     loadStructure();
+    if (!scenarios) loadScenarios();
     if (cache[tf]) { build(); return; }
     wrap.textContent = 'Loading ' + tf + ' candles...';
     fetchChunk(null).then(function (d) {
@@ -346,6 +384,34 @@ CHART_SCRIPT = r"""
       if (stl.swing_low) series.candles.createPriceLine({price: stl.swing_low, color: css('--down'), lineWidth: 1,
         lineStyle: LWC.LineStyle.Dotted, axisLabelVisible: true, title: 'swing low'});
     }
+    // Scenarios: dashed paths from the last close to each scenario's level, on the daily chart;
+    // target / stop lines on the other timeframes.
+    if (enabled.scenarios && scenarios && scenarios.scenarios) {
+      var lastTime = c.candles[c.candles.length - 1][0], lastClose = c.candles[c.candles.length - 1][4];
+      var colors = {bull: css('--up'), bear: css('--down'), range: css('--text-muted')};
+      if (tf === '1d') {
+        scenarios.scenarios.forEach(function (s) {
+          var end = Math.floor(Date.parse(s.by) / 1000 / 86400) * 86400;
+          var name = s.kind + ' ' + Math.round(s.probability * 100) + '%';
+          if (s.kind === 'range') {
+            [scenarios.target, scenarios.stop].forEach(function (level, k) {
+              var band = chart.addSeries(LWC.LineSeries, {color: colors.range, lineWidth: 1, lineStyle: LWC.LineStyle.Dotted,
+                priceLineVisible: false, lastValueVisible: k === 0, title: k === 0 ? name : '', crosshairMarkerVisible: false});
+              band.setData([{time: lastTime, value: level}, {time: end, value: level}]);
+            });
+            return;
+          }
+          var path = chart.addSeries(LWC.LineSeries, {color: colors[s.kind], lineWidth: 2, lineStyle: LWC.LineStyle.Dashed,
+            priceLineVisible: false, lastValueVisible: true, title: name, crosshairMarkerVisible: false});
+          path.setData([{time: lastTime, value: lastClose}, {time: end, value: s.level}]);
+        });
+      } else {
+        series.candles.createPriceLine({price: scenarios.target, color: colors.bull, lineWidth: 1,
+          lineStyle: LWC.LineStyle.Dashed, axisLabelVisible: true, title: 'bull target'});
+        series.candles.createPriceLine({price: scenarios.stop, color: colors.bear, lineWidth: 1,
+          lineStyle: LWC.LineStyle.Dashed, axisLabelVisible: true, title: 'bear target'});
+      }
+    }
     // An open trade: dashed lines at the buy price and the stop.
     if (enabled.trades && state && state.position) {
       var pos = state.position;
@@ -360,7 +426,8 @@ CHART_SCRIPT = r"""
     small.forEach(function (i) { if (panes[i]) panes[i].setStretchFactor(i === 1 && enabled.volume ? 0.6 : 1); });
 
     if (range) chart.timeScale().setVisibleLogicalRange(range);
-    else chart.timeScale().setVisibleLogicalRange({from: c.candles.length - (tf === '1d' ? 365 : 300), to: c.candles.length + 5});
+    else chart.timeScale().setVisibleLogicalRange({from: c.candles.length - (tf === '1d' ? (enabled.scenarios && scenarios ? 150 : 365) : 300),
+      to: c.candles.length + (tf === '1d' && enabled.scenarios && scenarios ? 40 : 5)});  // room for the scenario paths
 
     chart.timeScale().subscribeVisibleLogicalRangeChange(function (r) { if (r && r.from < 50) loadOlder(); });
     chart.subscribeCrosshairMove(readout);
@@ -370,11 +437,17 @@ CHART_SCRIPT = r"""
   function fill() {
     var c = cache[tf], ind = c.indicators;
     var up = css('--up'), down = css('--down'), filled = css('--filled');
-    series.candles.setData(c.candles.map(function (k) {
+    var candleData = c.candles.map(function (k) {
       var d = {time: k[0], open: k[1], high: k[2], low: k[3], close: k[4]};
       if (k[6]) { d.color = filled; d.wickColor = filled; }
       return d;
-    }));
+    });
+    // Empty future days, so the scenario paths get real width (the chart spaces bars by count, not by date).
+    if (tf === '1d' && enabled.scenarios && scenarios && scenarios.horizon_days) {
+      var lastDay = c.candles[c.candles.length - 1][0];
+      for (var k = 1; k <= scenarios.horizon_days + 5; k++) candleData.push({time: lastDay + k * 86400});
+    }
+    series.candles.setData(candleData);
     ['ema_20', 'ema_50', 'ema_200', 'bb_upper', 'bb_middle', 'bb_lower', 'rsi_14', 'macd', 'macd_signal', 'atr_14'].forEach(function (name) {
       if (!series[name]) return;
       var data = [];
@@ -477,7 +550,7 @@ def chart_page() -> str:
         + "<div class='toolbar'><div class='seg' id='tf' role='group' aria-label='Timeframe'></div>"
         "<div class='toggles' id='toggles'></div>"
         "<label class='secondary' style='font-size:14px'>Strategy: <select id='strategy'></select></label></div>"
-        "<div class='state-strip' id='state'></div>"
+        "<div class='state-strip' id='state'></div><div class='scenario-strip' id='scenarios'></div>"
         "<div id='chart-wrap'><div id='readout'></div><div id='chart'></div></div>"
         "<div class='note'>Scroll or drag to move back in time (older candles load automatically), "
         "pinch or mouse wheel to zoom. Grey candles contain hours filled in from another exchange "
