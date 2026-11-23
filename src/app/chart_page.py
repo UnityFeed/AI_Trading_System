@@ -180,12 +180,22 @@ CHART_SCRIPT = r"""
   var structures = {};  // timeframe -> market structure (/api/structure)
   var scenarios = null;  // the AI's scenarios for now or the replay day (/api/scenarios)
   var tools = {};  // timeframe|day -> chart tools (/api/tools)
-  var horizon = load('chart-horizon', 30);
+  // AI forecast horizons per timeframe, in candles (the weekly chart has no AI forecast)
+  var HORIZONS = {'1h': [[24, '1 day'], [72, '3 days'], [168, '7 days']], '4h': [[6, '1 day'], [42, '7 days'], [84, '14 days']],
+                  '1d': [[7, '7 days'], [14, '14 days'], [30, '30 days']]};
+  var PERIOD = {'1h': 3600, '4h': 14400, '1d': 86400, '1w': 604800};
+  function horizonFor(frame) {
+    var options = HORIZONS[frame]; if (!options) return null;
+    var h = load('chart-horizon-' + frame, options[options.length - 1][0]);
+    return options.some(function (o) { return o[0] === h; }) ? h : options[options.length - 1][0];
+  }
+  var horizon = horizonFor(tf);
+  var scenarioTf = null, scenarioTimer = null;
   var replay = null;  // replay day (unix seconds of 00:00 UTC) or null = now
   var reveal = false, playing = null;
   var DAY = 86400;
   function limitTime() {  // last candle time shown: the replay day's close, plus the horizon when revealed
-    return replay === null ? Infinity : replay + DAY - 1 + (reveal ? horizon * DAY : 0);
+    return replay === null ? Infinity : replay + DAY - 1 + (reveal && horizon ? horizon * PERIOD[tf] : 0);
   }
   function shown(c) {  // how many of the loaded candles are visible
     var lim = limitTime(), n = c.candles.length;
@@ -205,6 +215,7 @@ CHART_SCRIPT = r"""
     b.addEventListener('click', function () {
       tf = name; save('chart-tf', tf);
       tfBox.querySelectorAll('button').forEach(function (x) { x.setAttribute('aria-pressed', x.textContent === tf ? 'true' : 'false'); });
+      fillHorizons(); scenarios = null; builtTf = null;
       show();
     });
     tfBox.appendChild(b);
@@ -230,13 +241,20 @@ CHART_SCRIPT = r"""
 
   // AI forecast horizon and replay controls
   var horizonSelect = document.getElementById('horizon');
-  horizonSelect.value = String(horizon);
-  horizonSelect.addEventListener('change', function () { horizon = Number(horizonSelect.value); save('chart-horizon', horizon); builtTf = null; loadScenarios(); });
+  function fillHorizons() {
+    horizon = horizonFor(tf);
+    horizonSelect.textContent = '';
+    (HORIZONS[tf] || [[0, 'on 1h / 4h / 1d']]).forEach(function (o) {
+      var opt = document.createElement('option'); opt.value = String(o[0]); opt.textContent = o[1]; horizonSelect.appendChild(opt);
+    });
+    horizonSelect.disabled = !HORIZONS[tf];
+    if (horizon) horizonSelect.value = String(horizon);
+  }
+  fillHorizons();
+  horizonSelect.addEventListener('change', function () { horizon = Number(horizonSelect.value); save('chart-horizon-' + tf, horizon); builtTf = null; loadScenarios(); });
   document.getElementById('replay-date').addEventListener('change', function (e) {
     if (!e.target.value) { setReplay(null); return; }
-    var day = Date.parse(e.target.value + 'T00:00:00Z') / 1000;
-    if (tf !== '1d') { tf = '1d'; tfBox.querySelectorAll('button').forEach(function (x) { x.setAttribute('aria-pressed', x.textContent === '1d' ? 'true' : 'false'); }); show(); }
-    setReplay(day);
+    setReplay(Date.parse(e.target.value + 'T00:00:00Z') / 1000);
   });
   function step(days) {
     var c = cache[tf]; if (!c) return;
@@ -251,7 +269,7 @@ CHART_SCRIPT = r"""
   document.getElementById('replay-next').addEventListener('click', function () { stopPlay(); step(1); });
   document.getElementById('replay-play').addEventListener('click', function (e) {
     if (playing) { stopPlay(); return; }
-    if (replay === null) { var c = cache[tf]; if (c) setReplay(c.candles[Math.max(0, c.candles.length - 365)][0]); }
+    if (replay === null) { var c = cache[tf]; if (c) setReplay(Math.floor((c.candles[c.candles.length - 1][0] - 365 * DAY) / DAY) * DAY); }
     e.target.setAttribute('aria-pressed', 'true');
     playing = setInterval(function () { step(1); }, 700);
   });
@@ -313,16 +331,22 @@ CHART_SCRIPT = r"""
       renderState();
     });
   }
+  function scenarioUrl() {  // the forecast made at the last close of the replay day (or the latest close)
+    return '/api/scenarios?tf=' + tf + '&h=' + horizon + (replay !== null ? '&date=' + (replay + DAY - PERIOD[tf]) : '');
+  }
   function loadScenarios() {
-    var url = '/api/scenarios?h=' + horizon + (replay !== null ? '&date=' + replay : '');
-    var asked = url;
-    fetch(url).then(function (r) { return r.json(); }).then(function (d) {
-      if (asked !== '/api/scenarios?h=' + horizon + (replay !== null ? '&date=' + replay : '')) return;
-      var first = !scenarios;
-      scenarios = d; renderScenarios();
+    if (scenarioTimer) { clearTimeout(scenarioTimer); scenarioTimer = null; }
+    if (!HORIZONS[tf]) { scenarios = null; renderScenarios(); return; }
+    var asked = scenarioUrl();
+    fetch(asked).then(function (r) { return r.json(); }).then(function (d) {
+      if (asked !== scenarioUrl()) return;
+      if (d.status === 'learning') { scenarios = d; renderScenarios(); scenarioTimer = setTimeout(loadScenarios, 5000); return; }
+      var first = !scenarios || scenarios.status === 'learning' || scenarioTf !== tf;
+      scenarios = d; scenarioTf = tf; renderScenarios();
       if (cache[tf]) { if (first) builtTf = null; build(); }
     });
   }
+  function ready() { return scenarios && scenarios.scenarios && !scenarios.error && scenarioTf === tf; }
   function loadTools() {
     var key = tf + '|' + (replay === null ? 'now' : replay);
     if (tools[key]) { renderTools(); if (cache[tf]) build(); return; }
@@ -336,19 +360,23 @@ CHART_SCRIPT = r"""
   function renderScenarios() {
     var box = document.getElementById('scenarios'); box.textContent = '';
     document.body.classList.toggle('replaying', replay !== null);
-    if (!scenarios || !enabled.scenarios) return;
+    if (!enabled.scenarios) return;
     function el(tag, text, cls) { var e = document.createElement(tag); e.textContent = text; if (cls) e.className = cls; box.appendChild(e); return e; }
+    if (!HORIZONS[tf]) { el('span', 'AI forecast: available on the 1h, 4h and 1d charts', 'muted'); return; }
+    if (!scenarios) return;
+    if (scenarios.status === 'learning') { el('span', scenarios.message, 'muted'); return; }
     if (scenarios.error) { el('span', 'AI forecast: ' + scenarios.error, 'muted'); return; }
-    el('strong', (replay !== null ? 'REPLAY · ' : '') + 'AI forecast, next ' + scenarios.horizon_days + ' days from the ' + scenarios.candle_time.slice(0, 10) + ' close:');
+    var when = tf === '1d' ? scenarios.candle_time.slice(0, 10) : scenarios.candle_time.slice(0, 16).replace('T', ' ') + ' UTC';
+    el('strong', (replay !== null ? 'REPLAY · ' : '') + 'AI forecast (' + tf + '), next ' + scenarios.horizon_label + ' from the ' + when + ' close:');
     scenarios.scenarios.forEach(function (s) {
       var name = {bull: 'Bull', bear: 'Bear', range: 'Range'}[s.kind];
-      var where = s.kind === 'range' ? ' (' + fmt(scenarios.stop, 0) + ' - ' + fmt(scenarios.target, 0) + ')' : ' to ' + fmt(s.level, 0) + ' in ~' + s.typical_days + ' d';
+      var where = s.kind === 'range' ? ' (' + fmt(scenarios.stop, 0) + ' - ' + fmt(scenarios.target, 0) + ')' : ' to ' + fmt(s.level, 0) + ' in ~' + (s.typical_days >= 1 ? Math.round(s.typical_days) + ' d' : Math.round(s.typical_days * 24) + ' h');
       var e = el('span', '', 'sc ' + s.kind); var b = document.createElement('b'); b.textContent = name + ' ' + pct(s.probability);
       e.appendChild(b); e.appendChild(document.createTextNode(where)); e.title = s.meaning + '. Proven wrong by ' + s.proven_wrong_by + '.';
     });
     if (scenarios.outcome && (replay === null || reveal)) {
       var top = scenarios.scenarios[0].kind, o = scenarios.outcome;
-      el('span', 'What happened: ' + o.kind.toUpperCase() + ' after ' + o.days + ' d ' + (o.kind === top ? '(top scenario right)' : '(top scenario was ' + top + ')'), 'sc ' + o.kind);
+      el('span', 'What happened: ' + o.kind.toUpperCase() + ' after ' + o.days + (tf === '1d' ? ' d ' : ' candles ') + (o.kind === top ? '(top scenario right)' : '(top scenario was ' + top + ')'), 'sc ' + o.kind);
     } else if (scenarios.outcome === null && replay !== null && reveal) {
       el('span', 'What happened: not decided yet', 'muted');
     }
@@ -359,6 +387,15 @@ CHART_SCRIPT = r"""
                          : 'no scored forecasts yet', 'muted');
     var tr = scenarios.track_record;
     if (tr && replay === null) el('span', tr.scored ? 'live log: ' + tr.scored + ' scored, top right ' + pct(tr.top_scenario_hit_rate) : 'live log: started, none scored yet', 'muted');
+    var t = scenarios.training;
+    if (t) {
+      var mem = (t.memorised_skill || []).filter(function (v) { return v !== null; });
+      var e = el('span', 'training: version "' + t.version_now + '", honest ' + (t.honest_skill >= 0 ? '+' : '') + (t.honest_skill * 100).toFixed(1) + '%' +
+        (mem.length ? ' · memorised passes ' + mem.map(function (v) { return (v >= 0 ? '+' : '') + (v * 100).toFixed(1) + '%'; }).join(' / ') + ' (inflated, not real)' : ''), 'muted');
+      e.title = 'Versions chosen per year on earlier years only: ' + t.choice_per_year.slice(-6).map(function (x) { return x.year + ' ' + x.config; }).join(', ');
+    } else if (replay === null) {
+      el('span', 'no training session yet: one version, learned live', 'muted');
+    }
   }
   function renderTools() {
     var box = document.getElementById('tools-strip'); box.textContent = '';
@@ -376,14 +413,19 @@ CHART_SCRIPT = r"""
     if (enabled.profile && t.volume_profile) el('Volume profile ' + t.volume_profile.days + ' d (estimate): POC ' + fmt(t.volume_profile.poc, 0) +
       ', value area ' + fmt(t.volume_profile.val, 0) + ' - ' + fmt(t.volume_profile.vah, 0), 'muted');
   }
+  function prepend(c, d) {  // add an older chunk; candles already loaded (overlapping requests) are skipped
+    var first = c.candles[0][0], keep = 0;
+    while (keep < d.candles.length && d.candles[keep][0] < first) keep++;
+    c.candles = d.candles.slice(0, keep).concat(c.candles);
+    Object.keys(c.indicators).forEach(function (k) { c.indicators[k] = d.indicators[k].slice(0, keep).concat(c.indicators[k]); });
+    c.hasMore = d.has_more;
+  }
   function ensureLoaded(time, done) {  // load older chunks until the replay day is in the cache
     var c = cache[tf];
     if (!c || c.candles[0][0] <= time || !c.hasMore) { done(); return; }
     fetchChunk(c.candles[0][0]).then(function (d) {
       if (!d.candles.length) { c.hasMore = false; done(); return; }
-      c.candles = d.candles.concat(c.candles);
-      Object.keys(c.indicators).forEach(function (k) { c.indicators[k] = d.indicators[k].concat(c.indicators[k]); });
-      c.hasMore = d.has_more;
+      prepend(c, d);
       ensureLoaded(time, done);
     });
   }
@@ -398,7 +440,7 @@ CHART_SCRIPT = r"""
   }
   function show() {
     loadStructure();
-    if (!scenarios) loadScenarios();
+    if (!scenarios || scenarioTf !== tf) loadScenarios();
     loadTools();
     if (cache[tf]) { build(); return; }
     wrap.textContent = 'Loading ' + tf + ' candles...';
@@ -415,9 +457,7 @@ CHART_SCRIPT = r"""
     fetchChunk(c.candles[0][0]).then(function (d) {
       loading = false;
       if (frame !== tf || !d.candles.length) { c.hasMore = false; return; }
-      c.candles = d.candles.concat(c.candles);
-      Object.keys(c.indicators).forEach(function (k) { c.indicators[k] = d.indicators[k].concat(c.indicators[k]); });
-      c.hasMore = d.has_more;
+      prepend(c, d);
       var range = chart.timeScale().getVisibleLogicalRange();
       fill();
       if (range) chart.timeScale().setVisibleLogicalRange({from: range.from + d.candles.length, to: range.to + d.candles.length});
@@ -433,7 +473,7 @@ CHART_SCRIPT = r"""
 
   function build() {
     var c = cache[tf];
-    if (!c) return;
+    if (!c || !shown(c)) return;  // replay day not loaded yet (older candles still on their way)
     var range = chart && builtTf === tf ? chart.timeScale().getVisibleLogicalRange() : null;
     if (chart) chart.remove();
     wrap.textContent = '';
@@ -493,12 +533,12 @@ CHART_SCRIPT = r"""
     }
     // Scenarios: dashed paths from the last close to each scenario's level, on the daily chart;
     // target / stop lines on the other timeframes.
-    if (enabled.scenarios && scenarios && scenarios.scenarios && !scenarios.error) {
+    if (enabled.scenarios && ready()) {
       var lastTime = scenarios.time, lastClose = scenarios.close;
       var colors = {bull: css('--up'), bear: css('--down'), range: css('--text-muted')};
-      if (tf === '1d') {
+      if (HORIZONS[tf]) {
         scenarios.scenarios.forEach(function (s) {
-          var end = Math.floor(Date.parse(s.by) / 1000 / 86400) * 86400;
+          var end = Math.floor(Date.parse(s.by) / 1000 / PERIOD[tf]) * PERIOD[tf];
           var name = s.kind + ' ' + Math.round(s.probability * 100) + '%';
           if (s.kind === 'range') {
             [scenarios.target, scenarios.stop].forEach(function (level, k) {
@@ -570,8 +610,8 @@ CHART_SCRIPT = r"""
 
     var n = shown(c);
     if (range) chart.timeScale().setVisibleLogicalRange(range);
-    else chart.timeScale().setVisibleLogicalRange({from: n - (tf === '1d' ? (enabled.scenarios && scenarios ? 150 : 365) : 300),
-      to: n + (tf === '1d' && enabled.scenarios && scenarios ? horizon + 10 : 5)});  // room for the scenario paths
+    else chart.timeScale().setVisibleLogicalRange({from: n - (enabled.scenarios && ready() ? Math.max(150, horizon * 4) : (tf === '1d' ? 365 : 300)),
+      to: n + (enabled.scenarios && ready() ? horizon + 10 : 5)});  // room for the scenario paths
 
     chart.timeScale().subscribeVisibleLogicalRangeChange(function (r) { if (r && r.from < 50) loadOlder(); });
     chart.subscribeCrosshairMove(readout);
@@ -588,9 +628,9 @@ CHART_SCRIPT = r"""
       return d;
     });
     // Empty future days, so the scenario paths get real width (the chart spaces bars by count, not by date).
-    if (tf === '1d' && enabled.scenarios && scenarios && scenarios.horizon_days && cs.length) {
-      var lastDay = cs[cs.length - 1][0], until = (scenarios.time || lastDay) + (scenarios.horizon_days + 5) * DAY;
-      for (var day = lastDay + DAY; day <= until; day += DAY) candleData.push({time: day});
+    if (enabled.scenarios && ready() && cs.length) {
+      var period = PERIOD[tf], lastBar = cs[cs.length - 1][0], until = (scenarios.time || lastBar) + (scenarios.horizon_candles + 5) * period;
+      for (var future = lastBar + period; future <= until; future += period) candleData.push({time: future});
     }
     series.candles.setData(candleData);
     ['ema_20', 'ema_50', 'ema_200', 'bb_upper', 'bb_middle', 'bb_lower', 'rsi_14', 'macd', 'macd_signal', 'atr_14'].forEach(function (name) {
@@ -705,8 +745,7 @@ def chart_page() -> str:
         + "<div class='toolbar'><div class='seg' id='tf' role='group' aria-label='Timeframe'></div>"
         "<div class='toggles' id='toggles'></div>"
         "<label class='secondary' style='font-size:14px'>Strategy: <select id='strategy'></select></label></div>"
-        "<div class='toolbar replay-bar'><label>AI forecast <select id='horizon'><option value='7'>7 days</option>"
-        "<option value='14'>14 days</option><option value='30'>30 days</option></select></label>"
+        "<div class='toolbar replay-bar'><label>AI forecast <select id='horizon'></select></label>"
         "<span class='replay'>Replay from <input type='date' id='replay-date' aria-label='Replay date'>"
         "<button type='button' id='replay-back' aria-label='One day back'>&#9664; day</button>"
         "<button type='button' id='replay-next' aria-label='One day forward'>day &#9654;</button>"

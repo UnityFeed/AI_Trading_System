@@ -5,8 +5,10 @@ market and paper-trading files). Once its outcome is decided (the target or
 stop was reached, or the horizon passed), the outcome is added in a separate
 table, so the log shows over time how good the forecasts really were.
 
-One forecast per daily candle and model version: recording the same candle
-again does nothing (the first one stays).
+One forecast per candle and model version: recording the same candle again
+does nothing (the first one stays). The model version names the timeframe
+("learner-v3-4h-h42"; versions without a timeframe are daily). The column
+horizon_days holds the horizon in candles of that timeframe.
 """
 
 import json
@@ -21,6 +23,13 @@ from src.data_collection.market_data import MarketData
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_PATH = PROJECT_ROOT / "database" / "predictions.db"
+
+
+def timeframe_of(model_version: str) -> str:
+    for tf in ("1h", "4h", "1d"):
+        if f"-{tf}-" in model_version:
+            return tf
+    return "1d"
 
 
 class ForecastLog:
@@ -67,16 +76,18 @@ class ForecastLog:
             )
             return cursor.rowcount == 1
 
-    def score_pending(self, daily_candles: list[MarketData]) -> int:
-        """Add outcomes for forecasts that are now decided. Returns how many were added."""
+    def score_pending(self, daily_candles: list[MarketData], timeframe: str = "1d") -> int:
+        """Add outcomes for forecasts of this timeframe that are now decided. Returns how many were added."""
         by_time = {c.timestamp.isoformat(): i for i, c in enumerate(daily_candles)}
         added = 0
         with closing(sqlite3.connect(self.path)) as connection, connection:
             rows = connection.execute(
-                "SELECT f.id, f.candle_time, f.target, f.stop, f.horizon_days FROM forecasts f "
+                "SELECT f.id, f.model_version, f.candle_time, f.target, f.stop, f.horizon_days FROM forecasts f "
                 "LEFT JOIN outcomes o ON o.forecast_id = f.id WHERE o.forecast_id IS NULL"
             ).fetchall()
-            for fid, candle_time, target, stop, horizon in rows:
+            for fid, version, candle_time, target, stop, horizon in rows:
+                if timeframe_of(version) != timeframe:
+                    continue
                 i = by_time.get(candle_time)
                 if i is None:
                     continue
@@ -112,12 +123,12 @@ class ForecastLog:
                 "cases", "outcome", "decided_candle")
         return [dict(zip(keys, r)) for r in rows]
 
-    def track_record(self) -> dict:
-        """How the logged forecasts did so far: count, Brier score, hit rate of the top scenario."""
+    def track_record(self, model_version: str | None = None) -> dict:
+        """How the logged forecasts (of one model version, or all) did so far: count, Brier score, top-scenario hits."""
+        sql = "SELECT f.p_bull, f.p_bear, f.p_range, o.kind FROM forecasts f JOIN outcomes o ON o.forecast_id = f.id"
         with closing(sqlite3.connect(self.path)) as connection:
-            rows = connection.execute(
-                "SELECT f.p_bull, f.p_bear, f.p_range, o.kind FROM forecasts f JOIN outcomes o ON o.forecast_id = f.id"
-            ).fetchall()
+            rows = (connection.execute(sql + " WHERE f.model_version = ?", (model_version,)) if model_version
+                    else connection.execute(sql)).fetchall()
         if not rows:
             return {"scored": 0}
         brier = top_hits = ll = 0.0

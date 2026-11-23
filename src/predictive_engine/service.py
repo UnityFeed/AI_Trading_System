@@ -2,9 +2,15 @@
 The predictive engine as the app uses it: everything computed once per data
 load, then served for "now" or for any past day AS IT WAS KNOWN THEN (replay).
 
-  scenarios(horizon, day)  the learning engine's bull/bear/range forecast made
-                           at that day's close, its experts and their weights,
-                           targets, typical days, and (if decided) the outcome
+  scenarios(horizon, day, timeframe)
+                           the learning engine's bull/bear/range forecast made
+                           at that candle's close (1h, 4h or 1d), its experts
+                           and their weights, targets, typical time, and (if
+                           decided) the outcome. Forecasts come from the saved
+                           training session (`training.py`: 10 setting
+                           versions, chosen year by year on earlier years
+                           only) where it covers the candle, else from a live
+                           honest replay with the version chosen most recently
   tools(timeframe, until)  support/resistance zones, Fibonacci levels, chart
                            patterns with their status, ADX regime and the
                            volume profile, using only swings confirmed by then
@@ -13,20 +19,29 @@ load, then served for "now" or for any past day AS IT WAS KNOWN THEN (replay).
 
 import bisect
 import math
+import threading
 from datetime import datetime, timedelta, timezone
 
 from src.backtesting.market import Market
 from src.data_collection.market_data import MarketData
-from src.predictive_engine import learner
+from src.analysis.timeframes import TIMEFRAME_HOURS
+from src.predictive_engine import learner, training
 from src.predictive_engine.levels import adx, fibonacci, regime, support_resistance
-from src.predictive_engine.outcomes import daily_volatility
+from src.predictive_engine.outcomes import candle_volatility, default_min_move, outcomes
 from src.predictive_engine.patterns import detect_patterns, status_at, swings_known_over_time, track_record
 from src.predictive_engine.structure import analyse
 from src.predictive_engine.volume_profile import volume_profile
 
 
 K = 1.0
-MIN_MOVE = 0.03
+
+
+def horizon_label(timeframe: str, horizon: int) -> str:
+    hours = horizon * TIMEFRAME_HOURS[timeframe]
+    if hours % 24:
+        return f"{hours} hours"
+    days = hours // 24
+    return "1 day" if days == 1 else f"{days} days"
 
 
 def _t(dt: datetime) -> int:
@@ -35,87 +50,175 @@ def _t(dt: datetime) -> int:
 
 class EngineService:
 
-    def __init__(self, daily: Market, hourly: list[MarketData]):
+    def __init__(self, daily: Market, hourly: list[MarketData], markets: dict | None = None,
+                 cache: dict | None = None, timeframes=("1d",)):
+        """`markets`: 1h/4h/1d/1w markets (only needed for 1h/4h forecasts); `cache`: a saved training session."""
         self.market = daily
         self.hourly = hourly
         self.hour_times = [h.timestamp for h in hourly]
         self.times = [c.timestamp for c in daily.candles]
-        names, rows, keys = learner.build_inputs(daily)
-        self.replays = {h: learner.replay(daily, h, names, rows, keys) for h in learner.HORIZONS}
-        self.vol = daily_volatility(daily)
+        self.markets = dict(markets or {})
+        self.markets["1d"] = daily
+        self.cache = cache
+        self.replays: dict = {}  # timeframe -> {horizon: Replay}
+        self.info: dict = {}  # timeframe -> {horizon: training-session details or None}
+        self.vols: dict = {}
+        self.preparing: dict = {}  # timeframe -> threading.Thread
+        self.errors: dict = {}
+        self.lock = threading.Lock()
+        for tf in timeframes:
+            self.prepare(tf)
+        self.vol = self.vols.get("1d") or candle_volatility(daily)
         self.tool_cache: dict = {}
+
+    # -- learning ---------------------------------------------------------------
+
+    def horizons(self, timeframe: str) -> tuple:
+        return learner.TF_HORIZONS[timeframe]
+
+    def ready(self, timeframe: str) -> bool:
+        return timeframe in self.replays
+
+    def prepare(self, timeframe: str) -> None:
+        """Build the replays of one timeframe (from the training session where it still matches the data)."""
+        if timeframe in self.replays:
+            return
+        market = self.markets[timeframe]
+        times = [c.timestamp for c in market.candles]
+        saved = (self.cache or {}).get("timeframes", {}).get(timeframe)
+        usable = 0  # candles covered by the training session
+        if saved and saved["first"] == times[0].isoformat():
+            end = datetime.fromisoformat(saved["end"])
+            k = bisect.bisect_right(times, end)
+            if k == saved["n"] and times[k - 1] == end:
+                usable = k
+        replays, info = {}, {}
+        inputs = None
+        for h in self.horizons(timeframe):
+            out = outcomes(market, h, k=K)
+            saved_h = saved["horizons"].get(h) if saved else None
+            s = saved_h if usable else None
+            if s is not None and usable == len(times):
+                r = s["replay"]
+            else:
+                inputs = inputs or training.inputs_for(self.markets, timeframe)
+                config = next((c for c in learner.CONFIGS if saved_h and c.name == saved_h["current_config"]),
+                              learner.Config())
+                live = training.pack(learner.replay(market, h, *inputs, config=config, outcome_list=out))
+                r = live if s is None else _Stitched(s["replay"], live, usable)
+            r.outcomes = out
+            replays[h] = r
+            info[h] = None if saved_h is None else {k: saved_h[k] for k in ("table", "current_config", "configs", "nested", "memorised")}
+        self.vols[timeframe] = candle_volatility(market)
+        with self.lock:
+            self.info[timeframe] = info
+            self.replays[timeframe] = replays
+
+    def prepare_in_background(self, timeframe: str) -> None:
+        with self.lock:
+            if timeframe in self.replays or timeframe in self.preparing:
+                return
+
+            def run():
+                try:
+                    self.prepare(timeframe)
+                except Exception as error:  # shown to the user instead of hanging forever
+                    self.errors[timeframe] = str(error)
+
+            self.preparing[timeframe] = threading.Thread(target=run, daemon=True)
+            self.preparing[timeframe].start()
 
     # -- scenarios ------------------------------------------------------------
 
-    def day_index(self, day: datetime | None) -> int:
+    def day_index(self, day: datetime | None, timeframe: str = "1d") -> int:
+        times = self.times if timeframe == "1d" else [c.timestamp for c in self.markets[timeframe].candles]
         if day is None:
-            return len(self.times) - 1
-        k = bisect.bisect_right(self.times, day) - 1
+            return len(times) - 1
+        k = bisect.bisect_right(times, day) - 1
         return max(0, k)
 
-    def typical_days(self, horizon: int, i: int) -> dict:
-        """Median days each outcome took, over outcomes known at day i."""
-        r = self.replays[horizon]
+    def typical_days(self, horizon: int, i: int, timeframe: str = "1d") -> dict:
+        """Median candles each outcome took, over outcomes known at candle i."""
+        r = self.replays[timeframe][horizon]
         days = {k: [] for k in learner.KINDS}
-        for o in r.outcomes[:i + 1]:
+        for o in r.outcomes[max(0, i - 20000):i + 1]:
             if o is not None and o.decided_index <= i:
                 days[o.kind].append(o.days)
         return {k: (sorted(v)[len(v) // 2] if v else horizon) for k, v in days.items()}
 
-    def scenarios(self, horizon: int, day: datetime | None = None) -> dict:
-        r = self.replays[horizon]
-        i = self.day_index(day)
+    def scenarios(self, horizon: int, day: datetime | None = None, timeframe: str = "1d") -> dict:
+        if not self.ready(timeframe):
+            self.prepare(timeframe)
+        r = self.replays[timeframe][horizon]
+        market = self.markets[timeframe]
+        times = [c.timestamp for c in market.candles] if timeframe != "1d" else self.times
+        i = self.day_index(day, timeframe)
         while i > 0 and r.forecasts[i] is None:
             i -= 1
-        c = self.market.candles[i]
+        c = market.candles[i]
         p = r.forecasts[i]
         if p is None:
             return {"error": "no forecast this early in the history"}
-        move = max(MIN_MOVE, K * (self.vol[i] or 0.0) * math.sqrt(horizon))
+        vol = self.vols[timeframe]
+        move = max(default_min_move(timeframe), K * (vol[i] or 0.0) * math.sqrt(horizon))
         target, stop = c.close * (1 + move), c.close * (1 - move)
-        decided_at = c.timestamp + timedelta(days=1)
-        typical = self.typical_days(horizon, i)
+        period = timedelta(hours=TIMEFRAME_HOURS[timeframe])
+        decided_at = c.timestamp + period
+        typical = self.typical_days(horizon, i, timeframe)
+        label = horizon_label(timeframe, horizon)
+        close_word = {"1h": "an hourly close", "4h": "a 4-hour close", "1d": "a daily close"}[timeframe]
         paths = []
         for kind in sorted(learner.KINDS, key=lambda k: -p[k]):
-            days = horizon if kind == "range" else typical[kind]
+            candles = horizon if kind == "range" else typical[kind]
             paths.append({
                 "kind": kind, "probability": round(p[kind], 4),
                 "level": round({"bull": target, "bear": stop, "range": c.close}[kind], 2),
-                "typical_days": days, "by": (decided_at + timedelta(days=days)).isoformat(),
+                "typical_days": round(candles * TIMEFRAME_HOURS[timeframe] / 24, 2), "typical_candles": candles,
+                "by": (decided_at + period * candles).isoformat(),
                 "meaning": {
-                    "bull": f"a daily close at or above {target:,.0f} (+{move * 100:.1f}%) comes first",
-                    "bear": f"a daily close at or below {stop:,.0f} (-{move * 100:.1f}%) comes first",
-                    "range": f"neither within {horizon} days: closes stay between {stop:,.0f} and {target:,.0f}",
+                    "bull": f"{close_word} at or above {target:,.0f} (+{move * 100:.1f}%) comes first",
+                    "bear": f"{close_word} at or below {stop:,.0f} (-{move * 100:.1f}%) comes first",
+                    "range": f"neither within {label}: closes stay between {stop:,.0f} and {target:,.0f}",
                 }[kind],
                 "proven_wrong_by": {"bull": f"a close at or below {stop:,.0f}",
                                     "bear": f"a close at or above {target:,.0f}",
                                     "range": f"a close outside {stop:,.0f}-{target:,.0f}"}[kind],
             })
         o = r.outcomes[i]
-        known_outcome = o if o is not None else None
+        info = self.info[timeframe].get(horizon)
         return {
-            "candle_time": c.timestamp.isoformat(), "time": _t(c.timestamp), "close": c.close,
-            "horizon_days": horizon, "move_pct": round(move * 100, 2),
+            "timeframe": timeframe, "candle_time": c.timestamp.isoformat(), "time": _t(c.timestamp), "close": c.close,
+            "horizon_days": horizon, "horizon_candles": horizon, "horizon_label": label,
+            "move_pct": round(move * 100, 2),
             "target": round(target, 2), "stop": round(stop, 2),
             "scenarios": paths,
             "experts": {e: {k: round(v, 4) for k, v in probs.items()} for e, probs in r.experts[i].items()},
             "weights": {e: round(v, 3) for e, v in r.weights[i].items()},
-            "outcome": None if known_outcome is None else {
-                "kind": known_outcome.kind, "days": known_outcome.days,
-                "decided_time": _t(self.times[known_outcome.decided_index]),
+            "outcome": None if o is None else {
+                "kind": o.kind, "days": o.days, "decided_time": _t(times[o.decided_index]),
             },
-            "score_so_far": self.score_until(horizon, i),
-            "model_version": f"{learner.VERSION}-h{horizon}",
+            "score_so_far": self.score_until(horizon, i, timeframe),
+            "model_version": f"{learner.VERSION}-{timeframe}-h{horizon}",
             "cases": sum(1 for x in r.outcomes[:i + 1] if x is not None and x.decided_index <= i),
+            "training": None if info is None else {
+                "version_now": info["current_config"],
+                "honest_skill": info["nested"].get("brier_skill"),
+                "memorised_skill": [m.get("brier_skill") for m in info["memorised"]],
+                "versions": [{"name": v["name"], "skill": v.get("brier_skill")} for v in info["configs"]],
+                "choice_per_year": info["table"],
+            },
         }
 
-    def score_until(self, horizon: int, i: int) -> dict:
-        """The engine's Brier skill vs the base rate over forecasts decided by day i."""
-        r = self.replays[horizon]
+    def score_until(self, horizon: int, i: int, timeframe: str = "1d") -> dict:
+        """The engine's Brier skill vs the base rate over forecasts decided by candle i."""
+        r = self.replays[timeframe][horizon]
         n = b = bb = hits = 0.0
         for j in range(i + 1):
-            o, p = r.outcomes[j], r.forecasts[j]
-            if o is None or p is None or o.decided_index > i:
+            o = r.outcomes[j]
+            if o is None or o.decided_index > i:
+                continue
+            p = r.forecasts[j]
+            if p is None:
                 continue
             n += 1
             b += learner.brier(p, o.kind)
@@ -125,8 +228,11 @@ class EngineService:
             return {"scored": 0}
         return {"scored": int(n), "brier_skill": round(1 - b / bb, 4), "top_hit_rate": round(hits / n, 3)}
 
-    def curve(self, horizon: int) -> list:
-        return [{"year": y, "days": n, "skill": round(1 - b / bb, 4)} for y, n, b, bb in self.replays[horizon].learning_curve]
+    def curve(self, horizon: int, timeframe: str = "1d") -> list:
+        r = self.replays[timeframe][horizon]
+        if not r.learning_curve:
+            r.learning_curve = learner.learning_curve(r, self.markets[timeframe])
+        return [{"year": y, "days": n, "skill": round(1 - b / bb, 4)} for y, n, b, bb in r.learning_curve]
 
     # -- chart tools -------------------------------------------------------------
 
@@ -191,3 +297,29 @@ class EngineService:
                 "approximate": True,
             },
         }
+
+
+class _Stitched:
+    """Training-session forecasts up to `split`, live replay forecasts after it."""
+
+    def __init__(self, saved: learner.Replay, live: learner.Replay, split: int):
+        self.horizon = live.horizon
+        self.forecasts = _Join(saved.forecasts, live.forecasts, split)
+        self.experts = _Join(saved.experts, live.experts, split)
+        self.weights = _Join(saved.weights, live.weights, split)
+        self.outcomes = live.outcomes
+        self.learning_curve = []
+        self.config = live.config
+
+
+class _Join:
+    def __init__(self, first, second, split):
+        self.first, self.second, self.split = first, second, split
+
+    def __len__(self):
+        return len(self.second)
+
+    def __getitem__(self, i):
+        if i < 0:
+            i += len(self)
+        return self.first[i] if i < self.split else self.second[i]

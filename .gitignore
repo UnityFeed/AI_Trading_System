@@ -8,4 +8,5 @@ logs/*
 data/market/*
 data/historical/*
 data/backtests/*
+data/predictive/
 reports/*

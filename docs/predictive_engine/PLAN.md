@@ -40,6 +40,39 @@ cases, target zone and invalidation level, updated every day, and every
 forecast is stored and scored so the owner can see whether it works.
 
 ## Status
+- 23 Nov 2026 (latest), learning engine v3 BUILT (owner: "let it run once or
+  twice over the full chart... train on all the time frames... use data from a
+  higher timeframe"):
+  - All timeframes: separate learners on 1h (horizons 1/3/7 days), 4h
+    (1/7/14 days) and 1d (7/14/30 days). 1h/4h inputs (`mtf.py`): own chart
+    (RSI, EMA distances, MACD, returns scaled by volatility, ADX, structure,
+    S/R, Fibonacci, patterns) + the last COMPLETED 4h/1d/1w candle's trend,
+    ADX, EMA 50/200 distance, RSI and MACD. Truncation-tested.
+  - Outcomes work on any timeframe; a target/stop already reached near the end
+    of the data now counts at once (found by the truncation test).
+  - 10 setting versions (`learner.CONFIGS`), incl. monthly / weekly deep
+    re-study of all known outcomes and a self-correction layer learned from
+    its own decided forecasts. Nested walk-forward: each year uses the version
+    that was best on earlier years only (the honest result).
+  - Memorised passes: the current version goes over the whole chart 1-2 more
+    times starting with what it learned; reported only, as inflated.
+  - Training session `scripts/train_engine.py` -> cache + forecast CSVs in
+    `data/predictive/`; the app uses it and learns newer candles live.
+  - Test-DB training session (12 min on 4 cores; skill vs the base rate,
+    Brier, all scored years; top scenario right in brackets):
+    | chart | short | middle | long | memorised passes (long) |
+    | 1d (7/14/30 days)  | +0.55% (61%) | +0.92% (54%) | +0.69% (46%) | +5.5% / +6.3% |
+    | 4h (1/7/14 days)   | +0.85% (64%) | +0.79% (48%) | +0.12% (43%) | +0.9% / +1.0% |
+    | 1h (1/3/7 days)    | +1.37% (55%) | +0.69% (47%) | +0.09% (43%) | +0.2% / +0.2% |
+    Short horizons are the most predictable; all edges are small. Memory
+    inflates the daily chart most (few candles to memorise); on 1h, with
+    115,000 candles, a second pass learns almost nothing new. "slow learner"
+    is the version chosen most years; self-correction and deep re-study did
+    not win on their own. Owner to run `train_engine` on the real DB.
+  - Chart: the AI forecast follows the selected timeframe (horizons per
+    timeframe, paths on 1h/4h/1d, "training" line with honest vs memorised
+    score); replay works on 1h/4h too. Fixed: overlapping "load older
+    candles" requests duplicated candles (chart errors during replay).
 - 23 Nov 2026 (later), phases 6-7 + the learning engine BUILT (test DB; owner
   to confirm on the real DB with `run_learning_replay`):
   - Chart tools (`levels.py`, `volume_profile.py`): support/resistance zones

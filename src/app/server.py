@@ -32,7 +32,7 @@ from src.app.strategy_page import strategy_page
 from src.backtesting.engine import CostSettings, MarginSettings
 from src.backtesting.exposure import MissingExternalData
 from src.backtesting.market import build_market
-from src.predictive_engine import learner
+from src.predictive_engine import learner, training
 from src.predictive_engine.forecast_log import ForecastLog
 from src.predictive_engine.service import EngineService
 from src.predictive_engine.structure import analyse as analyse_structure
@@ -141,19 +141,28 @@ class AppState:
     def _engine(self) -> EngineService:
         """The predictive engine for the current data (call with data_lock held)."""
         if self.engine is None:
-            self.engine = EngineService(self._market("1d"), self.history.candles)
+            markets = {tf: self._market(tf) for tf in ("1h", "4h", "1d", "1w")}
+            self.engine = EngineService(markets["1d"], self.history.candles, markets=markets, cache=training.load())
         return self.engine
 
-    def scenario_state(self, horizon: int = 30, day: datetime | None = None) -> dict:
+    def scenario_state(self, horizon: int = 30, day: datetime | None = None, timeframe: str = "1d") -> dict:
         """The learning engine's scenarios at the latest close (logged once per candle) or as made on a past day."""
         with self.data_lock:
             engine = self._engine()
-            payload = engine.scenarios(horizon, day)
-            payload["learning_curve"] = engine.curve(horizon)
+            if not engine.ready(timeframe):
+                if timeframe in engine.errors:
+                    return {"error": f"the {timeframe} learner failed: {engine.errors[timeframe]}"}
+                engine.prepare_in_background(timeframe)  # 1h/4h: replay the whole chart once (up to ~2 minutes)
+                return {"status": "learning", "timeframe": timeframe,
+                        "message": f"The {timeframe} AI is getting ready: seconds with a training session, up to a few "
+                                   "minutes without one (python -m scripts.train_engine)."}
+            payload = engine.scenarios(horizon, day, timeframe)
+            payload["learning_curve"] = engine.curve(horizon, timeframe)
+            candles = engine.markets[timeframe].candles
         if day is None and self.forecast_log is not None and "scenarios" in payload:
             self.forecast_log.record(payload)
-            self.forecast_log.score_pending(engine.market.candles)
-            payload["track_record"] = self.forecast_log.track_record()
+            self.forecast_log.score_pending(candles, timeframe)
+            payload["track_record"] = self.forecast_log.track_record(payload["model_version"])
         return payload
 
     def tools(self, timeframe: str, until: datetime | None = None) -> dict:
@@ -326,12 +335,14 @@ def make_handler(state: AppState):
                     if until:
                         day = (datetime.fromtimestamp(int(until), timezone.utc) if until.isdigit()
                                else datetime.fromisoformat(until).replace(tzinfo=timezone.utc))
-                    if url.path == "/api/scenarios":
-                        horizon = int(query.get("h", ["30"])[0])
-                        if horizon not in learner.HORIZONS:
-                            raise ValueError
-                        return self._json(state.scenario_state(horizon, day))
                     timeframe = query.get("tf", ["1d"])[0]
+                    if url.path == "/api/scenarios":
+                        if timeframe not in learner.TF_HORIZONS:
+                            raise ValueError
+                        horizon = int(query.get("h", [str(learner.TF_HORIZONS[timeframe][-1])])[0])
+                        if horizon not in learner.TF_HORIZONS[timeframe]:
+                            raise ValueError
+                        return self._json(state.scenario_state(horizon, day, timeframe))
                     if timeframe not in TIMEFRAMES:
                         raise ValueError
                     return self._json(state.tools(timeframe, day))

@@ -1,6 +1,6 @@
 # AI Trading System: project guide for Claude Code
 
-Last updated: 22 Nov 2026. Owner: UnityFeed (beginner in Python, learning while building).
+Last updated: 23 Nov 2026. Owner: UnityFeed (beginner in Python, learning while building).
 
 **Keep this file current.** Whenever a roadmap step, known issue or decision
 changes, update the relevant section here in the same commit.
@@ -137,6 +137,22 @@ their own `database/predictions.db` (phase 4).
   `python -m scripts.run_learning_replay` (skill per horizon, experts, blend
   weights, learning curve, pattern track record). Test DB: 7 days +1.1% vs the
   base rate, 14 days +0.2%, 30 days -0.5%.
+- Learning engine v3 (23 Nov 2026, owner: "let it train on all the time
+  frames... use data from a higher timeframe"): AI forecasts on 1h (1/3/7
+  days), 4h (1/7/14 days) and 1d (7/14/30 days). 1h/4h learners read their
+  own chart plus the LAST COMPLETED 4h/1d/1w candle (trend, ADX, distance from
+  EMA 50/200, RSI, MACD) (`mtf.py`). 10 setting versions (`learner.CONFIGS`:
+  learning speed, blend speed, monthly/weekly deep re-study of known outcomes,
+  self-correction from its own decided forecasts); each year uses the version
+  that scored best on EARLIER years only (nested walk-forward = the honest
+  result the app shows and logs). 1-2 "memorised" extra passes over the full
+  chart are reported next to it as inflated, never used.
+  TRAINING SESSION (~10-20 min, all cores): `python -m scripts.train_engine`
+  (`--timeframes 1d 4h`, `--workers 2`, `--memorised 1`) -> 
+  `data/predictive/engine_cache.pkl` (app starts with it; candles newer than
+  the session are learned live) and `data/predictive/forecasts_<tf>_h<h>.csv`
+  (every forecast as made, with outcome). Without a session the app learns
+  1h/4h in the background the first time (about 1-2 minutes).
 
 ## Architecture (keep it; do not redesign without a clear reason)
 - `src/data_collection/`: `MarketData` dataclass, `data_validator`, `MarketDataProvider`
@@ -240,8 +256,13 @@ their own `database/predictions.db` (phase 4).
   `levels.py` (S/R zones, Fibonacci, ADX, regime), `volume_profile.py`,
   `patterns.py` (`swings_known_over_time`, `detect_patterns` with life cycle,
   `track_record`, `pattern_features`), `learner.py` (`build_inputs`, `replay`:
-  experts + Hedge blend, `learning_curve`), `service.py` (`EngineService`:
-  scenarios/tools for now or any past day, used by the app)
+  experts + Hedge blend, `Config`/`CONFIGS`, `Calibrator`, `passes`
+  (memorised), `choose_by_year` + `chain` (nested choice), `skill`,
+  `learning_curve`; `TF_HORIZONS`), `mtf.py` (`tf_inputs`: 1h/4h features +
+  completed higher-timeframe context), `training.py` (`train_timeframe`
+  in parallel, compact `Column` storage, `save`/`load` cache, forecast CSV),
+  `service.py` (`EngineService`: scenarios per timeframe/tools for now or any
+  past day, cache + live stitching, background learning, used by the app)
 - `src/risk_management/`, `src/execution/`: empty packages (not started)
 - `scripts/`: update, integrity, comparison, anomaly, research and app tools;
   `scripts/archive/` holds finished one-time jobs (initial imports incl. the
