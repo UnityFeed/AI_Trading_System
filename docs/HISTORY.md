@@ -419,3 +419,22 @@ Robustness lesson: the price source alone (Bitstamp vs Kraken, ~0.1-0.2%
 apart) moved the crossover strategies a lot (daily MACD/EMA crosses fire on
 other days), while the slow weekly lab strategy barely changed. The lab
 strategy is the most robust candidate; the daily crossover rules are fragile.
+
+
+## 24 Nov 2026: price targets on the chart (test DB)
+
+`targets.py`: T1-T3 / S1-S3 from real chart levels (S/R zones, swing
+high/low, Fibonacci, pattern targets, AI 1-typical-move targets), merged
+within 0.4%; chance to be touched within the horizon from past cases with a
+similar AI chance for that direction (>= 150 cases, else widened).
+`run_target_check` (2017-now, ~10,000 targets per horizon):
+| chart, horizon | touched | Brier | plain distance rate | skill |
+| 1d 7 days  |     | (well calibrated) | | |
+| 1d 14 days | 66% | 0.1663 | 0.1668 | +0.3% |
+| 1d 30 days | 74% | 0.1522 | 0.1507 | -1.0% |
+| 4h 1 day   | 54% | 0.1950 | 0.1958 | +0.4% |
+| 4h 7 days  | 78% | 0.1448 | 0.1456 | +0.6% |
+| 4h 14 days | 84% | 0.1151 | 0.1160 | +0.7% |
+Calibration 1d 14 days: said 5/15/25/35/45/55/65/75/85/94% -> happened
+4/12/25/37/47/60/67/77/87/95%. Honest chances; the AI view adds little over
+distance alone.

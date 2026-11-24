@@ -80,7 +80,8 @@ ALWAYS activate the venv first: `.venv\Scripts\Activate.ps1` (prompt shows
   `run_strategy_research` (every registered strategy), `run_strategy_lab`
   (~200,000 combinations, ~6-9 min), `run_turning_points`, `run_ml_research`.
 - Predictive engine reports: `run_market_structure`, `run_scenario_outcomes`,
-  `run_scenario_models`, `run_learning_replay`.
+  `run_scenario_models`, `run_learning_replay`, `run_target_check` (are the
+  price targets' chances honest? `--timeframe 4h`).
 - Paper trading kill switch: `New-Item database\STOP_PAPER_TRADING` (delete to resume).
 - Order flow recorder: `start_recorder.bat` (`record_order_flow`).
 - Tests: `python -m pytest -q`. Status check: `python main.py`.
@@ -123,7 +124,9 @@ ALWAYS activate the venv first: `.venv\Scripts\Activate.ps1` (prompt shows
   `learner` (candle-by-candle replay, experts + Hedge blend, 10 setting
   versions, self-correction, memorised passes, nested choice), `ml_experts`
   (walk-forward LightGBM trees + analog kNN, pooled with the training coins,
-  time-aligned), `training` (parallel training session, compact cache),
+  time-aligned), `targets` (price targets T1-T3 / S1-S3 from real chart
+  levels + their chance to be touched within the horizon),
+  `training` (parallel training session, compact cache),
   `service` (`EngineService` for the app: forecasts and chart tools for now
   or any past candle, background preparation).
 - `src/app/`: `server` (127.0.0.1 only; POST needs header `X-App-Action: 1`;
@@ -236,6 +239,14 @@ the clean test. Predictive engine: owner's blueprint and the gated plan in
   +4.4% / +5.3% / +4.7% (1/3/7 days), 4h +2.1% / +3.8% / +3.8% (1/7/14 days),
   1d +1.1% / +1.2% / +0.1% (7/14/30 days). Real but small edges; treat the
   chances as rough odds. Training session ~25 min (first time, with coins).
+- Price targets on the chart (24 Nov 2026, owner: "I don't see real
+  targets"): T1-T3 above / S1-S3 below from support/resistance zones, swing
+  high/low, Fibonacci, pattern targets and the AI's 1-typical-move targets;
+  chance = how often a level that far was touched (candle high/low) within
+  the horizon in past cases with a similar AI view (only windows that had
+  ended). Test DB check (`run_target_check`): well calibrated (said 55% ->
+  59%, 85% -> 85-88%); the AI view adds only +0.3 to +0.7% over the plain
+  distance rate (1d 30 days -1.0%): the chances mostly reflect distance.
 - Upgrades done 24 Nov 2026: libraries, pattern experts, GitHub Actions,
   backups, speed (app start ~1.4 s, training ~3x faster), cleanup run
   (dead code removed, every script run against a test DB).

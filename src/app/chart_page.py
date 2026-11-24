@@ -130,6 +130,7 @@ body { height: 100vh; display: flex; flex-direction: column; }
   font-size: 13px; border-bottom: 1px solid var(--border); background: var(--card); }
 .scenario-strip:empty { display: none; }
 .scenario-strip .sc { font-variant-numeric: tabular-nums; }
+.scenario-strip .targets { flex-basis: 100%; }
 .scenario-strip .sc b { font-weight: 650; }
 .scenario-strip .bull { color: var(--up); } .scenario-strip .bear { color: var(--down); }
 .state-strip { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; padding: 8px 16px; font-size: 14px;
@@ -374,6 +375,20 @@ CHART_SCRIPT = r"""
       var e = el('span', '', 'sc ' + s.kind); var b = document.createElement('b'); b.textContent = name + ' ' + pct(s.probability);
       e.appendChild(b); e.appendChild(document.createTextNode(where)); e.title = s.meaning + '. Proven wrong by ' + s.proven_wrong_by + '.';
     });
+    var tg = scenarios.targets || [];
+    if (tg.length) {
+      var row = el('span', '', 'targets');
+      var head = document.createElement('b'); head.textContent = 'Targets (chance to be reached within ' + scenarios.horizon_label + '): ';
+      row.appendChild(head);
+      tg.forEach(function (t) {
+        var x = document.createElement('span'); x.className = 'sc ' + (t.side === 'up' ? 'bull' : 'bear');
+        x.textContent = t.name + ' ' + fmt(t.price, 0) + ' (' + (t.distance_pct > 0 ? '+' : '') + t.distance_pct.toFixed(1) + '%) ' +
+          (t.chance === null ? '?' : pct(t.chance));
+        x.title = t.why.join(', ') + (t.chance === null ? '' : '. Reached in ' + pct(t.chance) + ' of ' + t.cases.toLocaleString() +
+          ' similar past cases (same distance, similar AI view).');
+        row.appendChild(x); row.appendChild(document.createTextNode(' '));
+      });
+    }
     if (scenarios.outcome && (replay === null || reveal)) {
       var top = scenarios.scenarios[0].kind, o = scenarios.outcome;
       el('span', 'What happened: ' + o.kind.toUpperCase() + ' after ' + o.days + (tf === '1d' ? ' d ' : ' candles ') + (o.kind === top ? '(top scenario right)' : '(top scenario was ' + top + ')'), 'sc ' + o.kind);
@@ -564,6 +579,14 @@ CHART_SCRIPT = r"""
         series.candles.createPriceLine({price: scenarios.stop, color: colors.bear, lineWidth: 1,
           lineStyle: LWC.LineStyle.Dashed, axisLabelVisible: true, title: 'bear target'});
       }
+      // Price targets: real chart levels with their chance to be reached within the horizon
+      var targetEnd = lastTime + scenarios.horizon_candles * PERIOD[tf];
+      (scenarios.targets || []).forEach(function (t) {
+        var line = chart.addSeries(LWC.LineSeries, {color: t.side === 'up' ? colors.bull : colors.bear, lineWidth: 1,
+          lineStyle: LWC.LineStyle.Solid, priceLineVisible: false, lastValueVisible: true, crosshairMarkerVisible: false,
+          title: t.name + (t.chance === null ? '' : ' ' + Math.round(t.chance * 100) + '%')});
+        line.setData([{time: lastTime, value: t.price}, {time: targetEnd, value: t.price}]);
+      });
     }
     // Chart tools as known on the shown day: support/resistance, Fibonacci, volume profile, patterns.
     var tl = currentTools();

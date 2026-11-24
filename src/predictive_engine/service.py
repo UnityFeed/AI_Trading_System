@@ -27,6 +27,7 @@ from src.backtesting.market import Market
 from src.data_collection.market_data import MarketData
 from src.analysis.timeframes import TIMEFRAME_HOURS
 from src.predictive_engine import learner, training
+from src.predictive_engine import targets as targets_mod
 from src.research import other_market_features
 from src.predictive_engine.levels import adx, fibonacci, regime, support_resistance
 from src.predictive_engine.outcomes import candle_volatility, default_min_move, outcomes
@@ -77,6 +78,7 @@ class EngineService:
             self.prepare(tf)
         self.vol = self.vols.get("1d") or candle_volatility(daily)
         self.tool_cache: dict = {}
+        self._target_data: dict = {}  # (timeframe, horizon) -> excursions + past AI chances
 
     # -- learning ---------------------------------------------------------------
 
@@ -230,7 +232,40 @@ class EngineService:
                 "versions": [{"name": v["name"], "skill": v.get("brier_skill")} for v in info["configs"]],
                 "choice_per_year": info["table"],
             },
+            "targets": self.targets(horizon, i, timeframe),
         }
+
+    def targets(self, horizon: int, i: int, timeframe: str = "1d") -> list[dict]:
+        """Real chart levels above and below the price at candle i, each with its chance to be reached in time."""
+        market = self.markets[timeframe]
+        c = market.candles[i]
+        vol = self.vols[timeframe]
+        if not vol[i]:
+            return []
+        key = (timeframe, horizon)
+        if key not in self._target_data:
+            r = self.replays[timeframe][horizon]
+            self._target_data[key] = (
+                targets_mod.excursions(market.candles, market.consecutive, vol, horizon),
+                targets_mod.chances_array(r.forecasts, "bull"),
+                targets_mod.chances_array(r.forecasts, "bear"),
+            )
+        exc, bull, bear = self._target_data[key]
+        tools = self.tools(timeframe, market.candles, c.timestamp)
+        structure = self.tool_cache[(timeframe, id(market.candles))][0]
+        scale = vol[i] * math.sqrt(horizon)
+        move = max(default_min_move(timeframe), K * scale)
+        levels = targets_mod.candidate_levels(
+            c.close, tools, structure.swing_high[i], structure.swing_low[i],
+            extra=((c.close * (1 + move), "AI bull target (1 typical move)"),
+                   (c.close * (1 - move), "AI bear target (1 typical move)")))
+        for level in levels:
+            units = abs(level["distance_pct"]) / 100 / scale
+            chance, cases = targets_mod.touch_chance(i, units, level["side"], exc,
+                                                     bull if level["side"] == "up" else bear)
+            level["chance"] = None if math.isnan(chance) else round(chance, 3)
+            level["cases"] = cases
+        return levels
 
     def score_until(self, horizon: int, i: int, timeframe: str = "1d") -> dict:
         """The engine's Brier skill vs the base rate over forecasts decided by candle i."""
