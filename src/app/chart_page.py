@@ -448,7 +448,7 @@ CHART_SCRIPT = r"""
       var ps = d.price_source, label = document.getElementById('price-source');
       if (ps && label) label.textContent = ps.exchange === 'bybit'
         ? 'Price: Bybit BTC/USDT from ' + new Date(ps.from * 1000).toISOString().slice(0, 10) +
-          ' (your exchange); before that Kraken (2017+) and Bitstamp. Strategies, paper trading and the AI use the Kraken history.'
+          ' (your exchange); before that Kraken (2017+) and Bitstamp. Strategies, paper trading and the AI use the same prices.'
         : 'Price: Kraken BTC/USD (2017+) and Bitstamp before (Bybit not downloaded yet: press "Update data").';
       cache[tf] = {candles: d.candles, indicators: d.indicators, markers: d.markers, hasMore: d.has_more};
       build();

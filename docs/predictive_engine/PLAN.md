@@ -40,6 +40,20 @@ cases, target zone and invalidation level, updated every day, and every
 forecast is stored and scored so the owner can see whether it works.
 
 ## Status
+- 24 Nov 2026 (latest): (1) Bybit is the main BTC price for everything
+  (chart, strategies, paper trading, AI) from its first candle in July 2021;
+  Kraken/Bitstamp before. (2) Training coins ETH, BNB, XRP, SOL, TRX (Binance
+  public data, 364k hourly candles) as extra examples for the pattern
+  experts, time-aligned; the pattern experts now use the multi-timeframe
+  inputs on 1d too. Honest test, test DB (same code, coins off vs on,
+  nested choice, all scored years):
+  | chart, horizon | without coins | with coins |
+  | 1d 7 / 14 / 30 days | +1.34 / +1.12 / +0.65% | +1.59 / +1.33 / +1.00% |
+  | 4h 1 / 7 / 14 days  | +2.00 / +3.04 / +2.91% | +2.17 / +3.62 / +3.70% |
+  | 1h 1 / 3 / 7 days   | +4.50 / +5.39 / +4.85% | +4.54 / +5.56 / +4.70% |
+  Coins help 1d and 4h (fewer own candles), 1h about level. ON by default.
+  Training session ~13 min on 4 cores; the app learns 4h from scratch in ~3
+  min without a session.
 - 24 Nov 2026 (later), other markets as AI inputs: S&P 500, Nasdaq 100,
   Dow 30, gold, silver (Yahoo daily, checked against FRED), a trading day D
   used from BTC's daily close of D on. Honest test, full training session

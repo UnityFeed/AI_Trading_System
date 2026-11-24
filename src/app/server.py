@@ -39,7 +39,7 @@ from src.predictive_engine.structure import analyse as analyse_structure
 from src.backtesting.report import start_years, strategy_report, strategy_state, trade_markers_from_report
 from src.strategies.registry import ACTIVE_STRATEGY_ID, STRATEGIES, get_strategy
 from src.analysis.technical_indicators import indicator_table
-from src.analysis.primary_history import CHART_EXCHANGE, CHART_SYMBOL, with_preferred_exchange
+from src.analysis.primary_history import CHART_EXCHANGE, CHART_SYMBOL
 from src.app.routine import daily_routine, load_history
 from src.data_collection.external_data import ExternalDataStore
 from src.data_collection.market_data_repository import MarketDataRepository
@@ -63,7 +63,7 @@ class AppState:
 
     def __init__(self, repository: MarketDataRepository, store: PaperTradingStore,
                  external_store: ExternalDataStore | None = None, extra_accounts=(),
-                 forecast_log: ForecastLog | None = None, other_markets_store=None):
+                 forecast_log: ForecastLog | None = None, other_markets_store=None, coins_repository=None):
         self.repository = repository
         self.store = store
         self.extra_accounts = list(extra_accounts)  # (ExtraAccount, PaperTradingStore)
@@ -71,6 +71,7 @@ class AppState:
 
         self.external_store = external_store
         self.other_markets_store = other_markets_store  # S&P 500, Nasdaq 100, Dow 30, gold, silver (AI inputs)
+        self.coins_repository = coins_repository  # the AI's training coins (ETH, BNB, XRP, SOL, TRX)
         self.job_lock = threading.Lock()
         self.data_lock = threading.Lock()
         self.busy = False
@@ -82,11 +83,10 @@ class AppState:
 
     def reload(self) -> None:
         """Rebuild everything shown in the app from the databases."""
+        # one BTC history for everything: Bybit (the owner's exchange) from its first
+        # candle, Kraken/Bitstamp before. Indicators per timeframe on first use.
         history = load_history(self.repository)
-        # the chart shows Bybit's price (the owner's exchange) where Bybit has it;
-        # strategies, backtests, paper trading and the AI keep the Kraken history.
-        # Indicators per timeframe are computed on first use (faster start).
-        chart_history = with_preferred_exchange(history, self.repository)
+        chart_history = history
         bybit = [t for t in chart_history.candles if chart_history.sources[t.timestamp] == CHART_EXCHANGE][:1]
         price_source = {"exchange": CHART_EXCHANGE if bybit else "primary", "symbol": CHART_SYMBOL if bybit else "BTC/USD",
                         "from": int(bybit[0].timestamp.timestamp()) if bybit else None}
@@ -175,8 +175,10 @@ class AppState:
         if self.engine is None:
             markets = {tf: self._market(tf) for tf in ("1h", "4h", "1d", "1w")}
             # every timeframe is prepared in the background on first use (never inside this lock)
+            coins = self.coins_repository
             self.engine = EngineService(markets["1d"], self.chart_history.candles, markets=markets,
-                                        cache=training.load(), timeframes=())
+                                        cache=training.load(), timeframes=(),
+                                        coin_loader=None if coins is None else lambda: training.load_coin_markets(coins))
         return self.engine
 
     def scenario_state(self, horizon: int = 30, day: datetime | None = None, timeframe: str = "1d") -> dict:

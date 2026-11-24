@@ -12,7 +12,7 @@ import webbrowser
 from datetime import datetime, timezone
 from pathlib import Path
 
-from src.analysis.primary_history import get_continuous_history
+from src.analysis.primary_history import get_trading_history
 from src.app.routine import HISTORY_START
 from src.data_collection.external_data import ExternalDataStore
 from src.data_collection.market_data_repository import MarketDataRepository
@@ -35,7 +35,7 @@ def build(
     store = store or PaperTradingStore()
     if history is None:
         end = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
-        history = get_continuous_history(repository=repository, start=HISTORY_START, end=end)
+        history = get_trading_history(repository=repository, start=HISTORY_START, end=end)
 
     output.parent.mkdir(parents=True, exist_ok=True)
     exposure = active_strategy().exposure

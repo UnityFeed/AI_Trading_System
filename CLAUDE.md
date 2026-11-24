@@ -173,6 +173,16 @@ their own `database/predictions.db` (phase 4).
   against FRED: median difference 0.0000% (S&P 500, Nasdaq 100, Dow).
   Test DB: they made the AI WORSE (both 25 separate and 6 compact inputs), so
   `AI_MODE = "off"`; `train_engine --markets compact|full` compares again.
+- Training coins (owner, 24 Nov 2026: "train the AI on other coins... pure
+  training"): ETH, BNB, XRP, SOL, TRX (top 5 by market value after BTC,
+  CoinGecko 24 Nov 2026), hourly from Binance's public data
+  (data-api.binance.vision, docs read 24 Nov 2026) into
+  `database/training_coins.db` (`training_coins.py`; never shown or traded).
+  The pattern experts learn from BTC + these coins (same multi-timeframe
+  inputs, a coin's outcome used only after it was decided, time-aligned).
+  `train_engine` updates them first (`--coins off`, `--no-coin-update`);
+  `python -m scripts.update_training_coins` on its own. Stocks/commodities
+  would need their own AI (owner).
 - Pattern experts (24 Nov 2026, `ml_experts.py`, needs the libraries):
   LightGBM trees (combinations of conditions) and "analog" (200 most similar
   past situations), retrained every 30 days on outcomes known by then, added
@@ -306,18 +316,22 @@ open, high, low, close, volume. DB primary key:
 (exchange, market, symbol, timeframe, timestamp).
 
 ## Decisions already made (do not reverse)
-- Kraken is primary; Bitstamp and Coinbase are independent validation sources.
-- Bybit (owner, 24 Nov 2026: "add Bybit BTC price and make this the main
-  price on the chart"): Bybit spot BTC/USDT hourly, exchange "bybit", symbol
-  "BTC/USDT" in the market DB (`bybit_provider.py`, api.bybit.eu then
-  api.bybit.com, docs read 24 Nov 2026). The CHART (candles, chart
-  indicators, structure, S/R/patterns, volume profile) shows Bybit from its
-  first candle (2021) and the continuous Kraken/Bitstamp history before
-  (`primary_history.with_preferred_exchange`); hours Bybit lacks show the
-  Kraken candle as "filled". Strategies, backtests, paper trading and the AI
-  stay on the Kraken history (switching those is a separate owner decision).
-  Bybit blocks the cloud sessions' country (HTTP 403): only the owner's PC can
-  download it.
+- Kraken is primary for 2017 to mid-2021 (Bybit from its first candle, see
+  below); Bitstamp and Coinbase are independent validation sources.
+- Bybit is the MAIN BTC PRICE (owner, 24 Nov 2026: "add Bybit BTC price and
+  make this the main price on the chart", then "yes switch to bybit" for
+  strategies, paper trading and the AI too): Bybit spot BTC/USDT hourly,
+  exchange "bybit", symbol "BTC/USDT" in the market DB (`bybit_provider.py`,
+  api.bybit.eu then api.bybit.com, docs read 24 Nov 2026).
+  `primary_history.get_trading_history` (used by `routine.load_history`, so by
+  the app, chart, paper trader, AI, backtests and research scripts) = Bybit
+  from its first candle (July 2021) + the continuous Kraken/Bitstamp history
+  before; hours Bybit lacks take the Kraken candle, count as substituted
+  (no fills there, shown as filled). Each paper decision stores
+  `price_source` in its snapshot. The Coinbase premium is still measured
+  against the Kraken USD history (USDT would distort it). Bybit blocks the
+  cloud sessions' country (HTTP 403): only the owner's PC can download it.
+  Kraken/Bitstamp/Coinbase stay as validation and fallback sources.
 - Never merge or overwrite exchanges in the DATABASE: each exchange's rows stay
   its own. Always pass `exchange=` explicitly (repository defaults to "kraken"
   only for backward compatibility).

@@ -305,10 +305,10 @@ def get_continuous_history(
 
 
 # ---------------------------------------------------------------------------
-# Chart history (owner, 24 Nov 2026): the CHART shows Bybit's BTC price (the
-# owner's exchange) wherever Bybit has it, and the continuous history before
-# Bybit's first candle. Strategies, backtests, paper trading and the AI keep
-# using the continuous Kraken/Bitstamp history above (unchanged decision).
+# Trading history (owner, 24 Nov 2026: "switch to Bybit"): Bybit's BTC price
+# (the owner's exchange) wherever Bybit has it, and the continuous
+# Kraken/Bitstamp history before Bybit's first candle. Used by the chart,
+# strategies, backtests, paper trading and the AI (get_trading_history).
 
 CHART_EXCHANGE = "bybit"
 CHART_SYMBOL = "BTC/USDT"
@@ -366,3 +366,14 @@ def with_preferred_exchange(
         candles=candles, sources=sources, primary_by_hour=primary_by_hour, source_changes=changes,
         unfilled_hours=[t for t in history.unfilled_hours if t not in have],
     )
+
+
+def get_trading_history(
+    repository: MarketDataRepository,
+    start: datetime,
+    end: datetime,
+    exclusions_file: str | Path = DEFAULT_EXCLUSIONS_FILE,
+) -> ContinuousHistory:
+    """The BTC history everything trades and learns on: Bybit first, Kraken/Bitstamp before (and in Bybit's gaps)."""
+    base = get_continuous_history(repository=repository, start=start, end=end, exclusions_file=exclusions_file)
+    return with_preferred_exchange(base, repository, exclusions_file=exclusions_file)

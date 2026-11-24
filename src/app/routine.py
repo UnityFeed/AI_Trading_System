@@ -14,7 +14,7 @@ and the app's button:
 
 from datetime import datetime, timezone
 
-from src.analysis.primary_history import ContinuousHistory, get_continuous_history
+from src.analysis.primary_history import ContinuousHistory, get_trading_history
 from src.data_collection.exchange_updater import update_all_exchanges
 from src.data_collection.external_data import ExternalDataStore, update_external_data
 from src.data_collection.market_data_repository import MarketDataRepository
@@ -28,7 +28,7 @@ HISTORY_START = datetime(2013, 1, 1, tzinfo=timezone.utc)
 
 def load_history(repository: MarketDataRepository) -> ContinuousHistory:
     end = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
-    return get_continuous_history(repository=repository, start=HISTORY_START, end=end)
+    return get_trading_history(repository=repository, start=HISTORY_START, end=end)  # Bybit first
 
 
 def daily_routine(

@@ -25,6 +25,9 @@ from concurrent.futures import ProcessPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 
+import numpy as np
+
+from src.analysis.timeframes import TIMEFRAME_HOURS
 from src.backtesting.market import Market, build_market
 from src.predictive_engine import learner, ml_experts, mtf
 from src.predictive_engine.outcomes import outcomes
@@ -41,6 +44,12 @@ def load_markets(history, tables=None, external=None) -> dict[str, Market]:
     tables = tables or {}
     return {tf: build_market(history, tf, table=tables.get(tf), external=external if tf == "1d" else None)
             for tf in ("1h", "4h", "1d", "1w")}
+
+
+def load_coin_markets(repository=None) -> dict:
+    """{coin: {tf: Market}} of the stored training coins (database/training_coins.db)."""
+    from src.data_collection.training_coins import coin_histories
+    return {coin: load_markets(history) for coin, history in coin_histories(repository).items()}
 
 
 def inputs_for(markets: dict[str, Market], timeframe: str):
@@ -119,11 +128,59 @@ def _init_worker(markets, timeframe, inputs, extras):
     _WORKER["outcomes"] = {}
 
 
-def pattern_experts(rows, outcome_list, timeframe: str) -> dict:
-    """The walk-forward trees + analog experts, or nothing if the libraries are not installed."""
+def pattern_inputs(markets: dict[str, Market], timeframe: str, inputs=None):
+    """
+    Inputs of the pattern experts: the multi-timeframe set (`mtf.tf_inputs`) on
+    every timeframe, because the training coins have exactly the same ones
+    (the daily chart's research features include BTC-only data).
+    """
+    if timeframe != "1d" and inputs is not None:
+        return inputs
+    return mtf.tf_inputs(markets, timeframe)
+
+
+def coin_rows(coin_markets: dict, timeframe: str, names: list[str]) -> list:
+    """(coin, market, rows aligned to `names`) for every training coin on this timeframe."""
+    out = []
+    for coin, cm in sorted(coin_markets.items()):
+        if timeframe not in cm or len(cm[timeframe].candles) < 300:
+            continue
+        c_names, c_rows, _ = mtf.tf_inputs(cm, timeframe)
+        index = {name: k for k, name in enumerate(c_names)}
+        columns = [index.get(name) for name in names]
+        X = np.zeros((len(c_rows), len(names)))
+        for j, k in enumerate(columns):
+            if k is not None:
+                X[:, j] = [row[k] for row in c_rows]
+        out.append((coin, cm[timeframe], X))
+    return out
+
+
+def _close_times(market: Market) -> np.ndarray:
+    period = TIMEFRAME_HOURS[market.timeframe] * 3600
+    return np.array([c.timestamp.timestamp() + period for c in market.candles])
+
+
+def pattern_experts(rows, outcome_list, timeframe: str, market: Market | None = None, coins=(), n_jobs: int = 1,
+                    horizon: int | None = None) -> dict:
+    """
+    The walk-forward trees + analog experts (nothing if the libraries are not
+    installed). `coins`: `coin_rows(...)` of the training coins, whose outcomes
+    for the same horizon are added as extra examples, time-aligned with BTC.
+    """
     if not ml_experts.available():
         return {}
-    return ml_experts.walk_forward_experts(rows, outcome_list, timeframe)
+    if not coins or market is None:
+        return ml_experts.walk_forward_experts(rows, outcome_list, timeframe, n_jobs=n_jobs)
+    pools = []
+    for coin, cm, X in coins:
+        c_out = outcomes(cm, horizon, k=1.0)
+        times = _close_times(cm)
+        y = np.array([-1 if o is None else learner.KINDS.index(o.kind) for o in c_out])
+        t = np.array([np.inf if o is None else times[o.decided_index] for o in c_out])
+        pools.append((X, y, t))
+    return ml_experts.walk_forward_experts(rows, outcome_list, timeframe, close_times=_close_times(market),
+                                           pools=pools, n_jobs=n_jobs)
 
 
 def _outcomes(horizon):
@@ -134,13 +191,11 @@ def _outcomes(horizon):
 
 
 def _task(job):
-    """One job inside a worker: ("extras", h, 0), ("score", h, k), ("full", h, k) or ("memorised", h, k, count)."""
+    """One job inside a worker: ("score", h, k), ("full", h, k) or ("memorised", h, k, count)."""
     kind, horizon, k = job[:3]
     market = _WORKER["markets"][_WORKER["timeframe"]]
     names, rows, keys = _WORKER["inputs"]
     out = _outcomes(horizon)
-    if kind == "extras":
-        return job, pattern_experts(rows, out, _WORKER["timeframe"])
     config = learner.CONFIGS[k]
     extra = (_WORKER["extras"] or {}).get(horizon)
     if kind == "memorised":
@@ -163,17 +218,24 @@ def _run(jobs, markets, timeframe, workers, inputs, extras=None):
 
 
 def train_timeframe(markets: dict[str, Market], timeframe: str, horizons=None, configs: int | None = None,
-                    memorised: int = 2, workers: int = 1, log=print, patterns: bool = True) -> dict:
-    """Everything for one timeframe: per-version scores, nested choice, chained replay, memorised passes."""
+                    memorised: int = 2, workers: int = 1, log=print, patterns: bool = True,
+                    coin_markets: dict | None = None) -> dict:
+    """
+    Everything for one timeframe: per-version scores, nested choice, chained
+    replay, memorised passes. `coin_markets` {coin: {tf: Market}}: the training
+    coins, extra examples for the pattern experts.
+    """
     market = markets[timeframe]
     horizons = horizons or learner.TF_HORIZONS[timeframe]
     count = configs or len(learner.CONFIGS)
     names = [c.name for c in learner.CONFIGS[:count]]
     inputs = inputs_for(markets, timeframe)
     extras = None
-    if patterns and ml_experts.available():  # trees + analog, walk-forward, once per horizon
-        done = _run([("extras", h, 0) for h in horizons], markets, timeframe, workers, inputs)
-        extras = {h: done[("extras", h, 0)] for h in horizons}
+    if patterns and ml_experts.available():  # trees + analog, walk-forward, once per horizon (all cores)
+        p_names, p_rows, _ = pattern_inputs(markets, timeframe, inputs)
+        coins = coin_rows(coin_markets or {}, timeframe, p_names)
+        extras = {h: pattern_experts(p_rows, outcomes(market, h, k=1.0), timeframe, market, coins, n_jobs=workers,
+                                     horizon=h) for h in horizons}
     scored = _run([("score", h, k) for h in horizons for k in range(count)], markets, timeframe, workers, inputs, extras)
     result = {"end": market.candles[-1].timestamp.isoformat(), "n": len(market.candles),
               "first": market.candles[0].timestamp.isoformat(), "horizons": {}}
@@ -202,6 +264,7 @@ def train_timeframe(markets: dict[str, Market], timeframe: str, horizons=None, c
             "nested": learner.skill(chained, market),
             "memorised": done[("memorised", h, current, memorised + 1)][1:] if mem_jobs else [],
             "experts": list(extras[h]) if extras else [],
+            "coins": [c for c, _, _ in coins] if extras else [],
         }
         log(f"  {timeframe} h={h}: honest (nested) {result['horizons'][h]['nested'].get('brier_skill', 0):+.2%}")
     return result

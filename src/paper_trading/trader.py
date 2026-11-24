@@ -173,6 +173,8 @@ class PaperTrader:
             else:
                 action, reason = self._decide(account, blocks, market, i)
                 snapshot = condition_snapshot(blocks, self.spec, market.rows[i], i)
+            # which exchange's price the decision was made on (Bybit from 2021, owner 24 Nov 2026)
+            snapshot["price_source"] = history.sources.get(candle.timestamp + period - timedelta(hours=1), "unknown")
             decision_id = self.store.add_decision(
                 candle.timestamp, action, reason, candle.close, snapshot
             )

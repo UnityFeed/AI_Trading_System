@@ -47,41 +47,63 @@ NEIGHBOURS = 200
 
 def walk_forward_experts(rows, outcome_list, timeframe: str, retrain_days: int = 30, min_examples: int = 300,
                          names=NAMES, max_train: int = 60000, seed: int = 7, trees: dict | None = None,
-                         neighbours: int | None = None) -> dict[str, list]:
-    """Per candle {expert: probabilities or None}, each from a model trained only on outcomes known by then."""
+                         neighbours: int | None = None, close_times=None, pools=(), n_jobs: int = 1) -> dict[str, list]:
+    """
+    Per candle {expert: probabilities or None}, each from a model trained only
+    on outcomes known by then.
+
+    `pools`: extra training examples from other coins, each (X, labels,
+    decided_time): an example is used at a BTC candle only if its outcome was
+    decided (its candle closed) at or before that BTC candle's close
+    (`close_times`, seconds since 1970, one per BTC candle).
+    """
     from lightgbm import LGBMClassifier
     from sklearn.neighbors import KNeighborsClassifier
 
     X = np.asarray(rows, dtype=np.float64)
     y = _labels(outcome_list)
     n = len(y)
-    decided = np.array([np.inf if o is None else o.decided_index for o in outcome_list])
+    if close_times is None:  # BTC alone: time = candle index
+        close_times = np.arange(n, dtype=np.float64)
+        decided_time = np.array([np.inf if o is None else float(o.decided_index) for o in outcome_list])
+    else:
+        close_times = np.asarray(close_times, dtype=np.float64)
+        decided_time = np.array([np.inf if o is None else close_times[o.decided_index] for o in outcome_list])
+    # one pool of examples (BTC + other coins), sorted by the time each outcome became known
+    X_all = np.vstack([X] + [np.asarray(px, dtype=np.float64) for px, _, _ in pools]) if pools else X
+    y_all = np.concatenate([y] + [np.asarray(py) for _, py, _ in pools]) if pools else y
+    t_all = np.concatenate([decided_time] + [np.asarray(pt, dtype=np.float64) for _, _, pt in pools]) if pools else decided_time
+    order = np.argsort(t_all, kind="stable")
+    t_sorted = t_all[order]
     every = max(1, round(retrain_days * 24 / TIMEFRAME_HOURS[timeframe]))
     out = {name: [None] * n for name in names}
     rng = np.random.default_rng(seed)
     for start in range(0, n, every):
-        known = np.flatnonzero(decided <= start)  # outcomes known at this close
-        if len(known) < min_examples or len(set(y[known])) < 3:
+        known = order[:np.searchsorted(t_sorted, close_times[start], side="right")]  # known at this close
+        known = known[y_all[known] >= 0]
+        if len(known) < min_examples or len(set(y_all[known])) < 3:
             continue
         if len(known) > max_train:  # all recent ones + a random sample of older ones
             half = max_train // 2
             older = rng.choice(known[:-half], max_train - half, replace=False)
-            known = np.sort(np.concatenate([older, known[-half:]]))
+            known = np.concatenate([older, known[-half:]])
         end = min(n, start + every)
         Xq = X[start:end]
+        Xk, yk = X_all[known], y_all[known]
         if "trees" in names:
             settings = dict(TREES, **(trees or {}))
             settings["min_child_samples"] = min(settings["min_child_samples"], max(20, len(known) // 10))
             model = LGBMClassifier(**settings, subsample=0.8, subsample_freq=1, colsample_bytree=0.8, reg_lambda=1.0,
-                                   random_state=seed, deterministic=True, n_jobs=1, verbose=-1)
-            model.fit(X[known], y[known])
+                                   random_state=seed, deterministic=True, force_row_wise=True, n_jobs=n_jobs,
+                                   verbose=-1)
+            model.fit(Xk, yk)
             p = _ordered(model.predict_proba(Xq), model.classes_)
             for i, row in zip(range(start, end), p):
                 out["trees"][i] = dict(zip(KINDS, map(float, row)))
         if "analog" in names:
             k = min(neighbours or NEIGHBOURS, len(known))
-            knn = KNeighborsClassifier(n_neighbors=k, weights="distance", algorithm="auto")
-            knn.fit(X[known], y[known])
+            knn = KNeighborsClassifier(n_neighbors=k, weights="distance", algorithm="auto", n_jobs=n_jobs)
+            knn.fit(Xk, yk)
             p = _ordered(knn.predict_proba(Xq), knn.classes_)
             p = (p * k + 1.0) / (k + 3.0)  # a little smoothing: never exactly 0 or 1
             for i, row in zip(range(start, end), p):

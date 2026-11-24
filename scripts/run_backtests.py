@@ -28,7 +28,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from statistics import median
 
-from src.analysis.primary_history import get_continuous_history
+from src.analysis.primary_history import get_trading_history
 from src.backtesting.engine import CostSettings
 from src.backtesting.market import build_market
 from src.backtesting.search import (
@@ -212,7 +212,7 @@ def main() -> None:
     costs = CostSettings(fee_pct=args.fee, slippage_pct=args.slippage)
     repository = MarketDataRepository(args.db) if args.db else MarketDataRepository()
     end = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
-    history = get_continuous_history(repository=repository, start=HISTORY_START, end=end)
+    history = get_trading_history(repository=repository, start=HISTORY_START, end=end)
 
     print("LONG-ONLY STRATEGY BACKTEST (buy low, sell high; no margin)")
     print("===========================================================")

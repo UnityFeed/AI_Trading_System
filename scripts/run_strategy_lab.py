@@ -31,11 +31,12 @@ import math
 import random
 import time
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import timedelta
 from pathlib import Path
 from statistics import median
 
 from src.analysis.market_data_quality import get_clean_candles
+from src.analysis.primary_history import get_continuous_history
 from src.app.routine import load_history
 from src.backtesting.engine import CostSettings
 from src.backtesting.exposure import run_exposure_backtest
@@ -56,10 +57,15 @@ def x(log_value: float) -> str:
 
 
 def load_premium(repository, history):
-    """Coinbase premium per day, leaving out hours the primary series took from Coinbase."""
+    """
+    Coinbase premium per day over the Kraken/Bitstamp USD history (not the
+    Bybit USDT prices, whose USDT/USD difference would distort it), leaving
+    out hours that history took from Coinbase.
+    """
     start, end = history.candles[0].timestamp, history.candles[-1].timestamp
+    usd = get_continuous_history(repository=repository, start=start, end=end + timedelta(hours=1))
     coinbase = get_clean_candles(repository, "BTC/USD", "crypto", "1h", start, end, exchange="coinbase")
-    own = [c for c in history.candles if history.sources.get(c.timestamp) != "coinbase"]
+    own = [c for c in usd.candles if usd.sources.get(c.timestamp) != "coinbase"]
     return coinbase_premium(own, coinbase)
 
 

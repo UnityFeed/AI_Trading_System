@@ -46,12 +46,14 @@ they install with one `pip install` on the owner's PC.
    missing (numpy is now required: indicators use it).
 
 ### B. More and better data
-1. More coins as extra TRAINING examples for the AI (ETH and 3-5 other large
-   coins, free history from Kraken/Coinbase): setups that work across coins
-   are more trustworthy than BTC-only ones. Forecasts stay BTC.
+1. [BUILT 24 Nov 2026] Training coins for the AI: ETH, BNB, XRP, SOL, TRX
+   (top 5 by market value after BTC), hourly from Binance public data since
+   2017-2020, own database file, pure training (never shown or traded).
+   Forecasts stay BTC. Stocks/commodities: their own AI later (owner).
 2. [BUILT 24 Nov 2026] Bybit's own BTC/USDT prices (the owner's exchange) as a
    4th source (own provider on Bybit's documented v5 API, no extra library);
-   the MAIN PRICE ON THE CHART from 2021 on. Strategies/AI stay on Kraken.
+   the MAIN BTC PRICE from July 2021 on for everything: chart, strategies,
+   backtests, paper trading, AI (owner: "switch to bybit").
 3. Derivatives context with free history: funding rates (Bybit/Binance from
    2019-2020), open interest, Deribit volatility index (DVOL, from 2021).
 4. [BUILT 24 Nov 2026] Other markets (owner): S&P 500, Nasdaq 100, Dow 30,

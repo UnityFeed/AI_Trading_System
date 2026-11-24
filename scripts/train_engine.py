@@ -8,6 +8,10 @@ with 10 setting versions, then:
   - memorised passes: the version used now goes over the same chart again
     (twice by default), starting with everything it already learned. These
     scores are inflated by memory; they show how much, nothing more.
+The pattern experts (decision trees, similar situations) also learn from
+the five largest coins after BTC (ETH, BNB, XRP, SOL, TRX; Binance public
+data, downloaded/updated first by this script): pure training examples,
+time-aligned with BTC (a coin's outcome is used only once it was known).
 The 1h and 4h learners also read the higher timeframes (4h, 1d, 1w: trend,
 trend strength, distance from EMA 50/200, RSI, MACD of the last COMPLETED
 higher candle).
@@ -31,6 +35,7 @@ from src.app.routine import load_history
 from src.data_collection.external_data import ExternalDataStore
 from src.data_collection.market_data_repository import MarketDataRepository
 from src.data_collection.other_markets import OtherMarketsStore
+from src.data_collection.training_coins import DEFAULT_PATH as COINS_DB, update_training_coins
 from src.predictive_engine import learner, training
 from src.research import other_market_features
 from src.predictive_engine.service import EngineService, horizon_label
@@ -51,6 +56,9 @@ def main() -> None:
     parser.add_argument("--db", type=Path, default=None, help=argparse.SUPPRESS)
     parser.add_argument("--external-db", type=Path, default=None, help=argparse.SUPPRESS)
     parser.add_argument("--other-markets-db", type=Path, default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--coins", choices=("on", "off"), default="on", help="learn from the training coins too")
+    parser.add_argument("--no-coin-update", action="store_true", help="use the stored training coins as they are")
+    parser.add_argument("--coins-db", type=Path, default=None, help=argparse.SUPPRESS)
     parser.add_argument("--out", type=Path, default=training.CACHE_FILE, help=argparse.SUPPRESS)
     args = parser.parse_args()
 
@@ -63,9 +71,18 @@ def main() -> None:
     history = load_history(repository)
     tables = indicator_tables(history.candles, ("1h", "4h", "1d", "1w"))
     markets = training.load_markets(history, tables, external)
+    coin_markets = {}
+    if args.coins == "on":
+        coins_repository = MarketDataRepository(args.coins_db or COINS_DB)
+        if not args.no_coin_update:
+            print("Updating the training coins (Binance public data; the first time takes ~10-15 minutes)...")
+            update_training_coins(coins_repository, log=lambda line: print("  " + line))
+        coin_markets = training.load_coin_markets(coins_repository)
 
     print("TRAINING SESSION: the learning engine on every timeframe, 10 setting versions each")
     print("=" * 96)
+    print("training coins: " + (", ".join(f"{c} ({len(m['1h'].candles):,} h)" for c, m in coin_markets.items())
+                                or "none (pattern experts learn from BTC only)"))
     print(f"data {history.candles[0].timestamp:%Y-%m-%d} to {history.candles[-1].timestamp:%Y-%m-%d %H:%M} UTC; "
           f"{args.workers} workers; other markets as AI inputs: {args.markets} "
           f"(stored: {', '.join(k[4:] for k in external if k.startswith('mkt.')) or 'none, run update_other_markets'}); versions: " + ", ".join(c.name for c in learner.CONFIGS[:args.configs]))
@@ -75,7 +92,8 @@ def main() -> None:
         t = time.time()
         print(f"\n{tf} chart ({len(markets[tf].candles):,} candles) ...", flush=True)
         cache["timeframes"][tf] = training.train_timeframe(markets, tf, configs=args.configs, memorised=args.memorised,
-                                                           workers=args.workers, log=lambda *a: None)
+                                                           workers=args.workers, log=lambda *a: None,
+                                                           coin_markets=coin_markets)
         print(f"  learned in {time.time() - t:.0f} s")
         for h, r in cache["timeframes"][tf]["horizons"].items():
             nested = r["nested"]
@@ -92,7 +110,8 @@ def main() -> None:
                       f"skill {pct(m.get('brier_skill'))}, top scenario right {m.get('top_hit_rate', 0):.1%}")
             print(f"    version used now: {r['current_config']}")
             print("    pattern experts: " + (", ".join(r.get("experts") or []) or
-                                           "off (pip install -r requirements.txt to add trees + analog)"))
+                                           "off (pip install -r requirements.txt to add trees + analog)") +
+                  (f", also learning from {', '.join(r['coins'])}" if r.get("coins") else ""))
             path = training.write_forecast_csv(markets[tf], tf, h, _with_outcomes(markets[tf], r["replay"], h),
                                                args.out.parent)
             print(f"    every forecast: {path}")

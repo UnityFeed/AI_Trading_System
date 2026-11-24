@@ -19,6 +19,7 @@ load, then served for "now" or for any past day AS IT WAS KNOWN THEN (replay).
 
 import bisect
 import math
+import os
 import threading
 from datetime import datetime, timedelta
 
@@ -52,7 +53,7 @@ def _t(dt: datetime) -> int:
 class EngineService:
 
     def __init__(self, daily: Market, hourly: list[MarketData], markets: dict | None = None,
-                 cache: dict | None = None, timeframes=("1d",), patterns: bool = True):
+                 cache: dict | None = None, timeframes=("1d",), patterns: bool = True, coin_loader=None):
         """`markets`: 1h/4h/1d/1w markets (only needed for 1h/4h forecasts); `cache`: a saved training session."""
         self.market = daily
         self.hourly = hourly
@@ -64,6 +65,8 @@ class EngineService:
         if cache and cache.get("markets_mode") in other_market_features.MODES:
             other_market_features.AI_MODE = cache["markets_mode"]  # same inputs as the training session
         self.patterns = patterns  # trees + analog experts (when the libraries are installed)
+        self.coin_loader = coin_loader  # () -> {coin: {tf: Market}}: training coins for the pattern experts
+        self._coins = None
         self.replays: dict = {}  # timeframe -> {horizon: Replay}
         self.info: dict = {}  # timeframe -> {horizon: training-session details or None}
         self.vols: dict = {}
@@ -97,7 +100,7 @@ class EngineService:
             if k == saved["n"] and times[k - 1] == end:
                 usable = k
         replays, info = {}, {}
-        inputs = None
+        inputs = pattern = coins = None
         for h in self.horizons(timeframe):
             out = outcomes(market, h, k=K)
             saved_h = saved["horizons"].get(h) if saved else None
@@ -108,7 +111,13 @@ class EngineService:
                 inputs = inputs or training.inputs_for(self.markets, timeframe)
                 config = next((c for c in learner.CONFIGS if saved_h and c.name == saved_h["current_config"]),
                               learner.Config())
-                extra = training.pattern_experts(inputs[1], out, timeframe) if self.patterns else None
+                extra = None
+                if self.patterns:
+                    if pattern is None:
+                        pattern = training.pattern_inputs(self.markets, timeframe, inputs)
+                        coins = training.coin_rows(self.coin_markets(), timeframe, pattern[0])
+                    extra = training.pattern_experts(pattern[1], out, timeframe, market, coins,
+                                                     n_jobs=os.cpu_count() or 1, horizon=h)
                 live = training.pack(learner.replay(market, h, *inputs, config=config, outcome_list=out,
                                                     extra_experts=extra))
                 r = live if s is None else _Stitched(s["replay"], live, usable)
@@ -119,6 +128,14 @@ class EngineService:
         with self.lock:
             self.info[timeframe] = info
             self.replays[timeframe] = replays
+
+    def coin_markets(self) -> dict:
+        if self._coins is None:
+            try:
+                self._coins = self.coin_loader() if self.coin_loader else {}
+            except Exception:  # training data is optional
+                self._coins = {}
+        return self._coins
 
     def prepare_in_background(self, timeframe: str) -> None:
         with self.lock:

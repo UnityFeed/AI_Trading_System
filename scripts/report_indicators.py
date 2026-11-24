@@ -15,7 +15,7 @@ import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from src.analysis.primary_history import get_continuous_history
+from src.analysis.primary_history import get_trading_history
 from src.analysis.technical_indicators import calculate_indicators
 from src.analysis.timeframes import (
     TIMEFRAME_HOURS,
@@ -44,7 +44,7 @@ def main(db_path: Path | None = None) -> None:
     # Only completed hours.
     end = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
 
-    history = get_continuous_history(
+    history = get_trading_history(
         repository=repository, start=HISTORY_START, end=end
     )
 
