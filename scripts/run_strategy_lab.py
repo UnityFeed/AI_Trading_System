@@ -40,7 +40,7 @@ from src.analysis.primary_history import get_continuous_history
 from src.app.routine import load_history
 from src.backtesting.engine import CostSettings
 from src.backtesting.exposure import run_exposure_backtest
-from src.backtesting.ledger import daily_sharpes, log_trials, read_trials, trial_count
+from src.backtesting.ledger import log_trials, read_trials, trial_count
 from src.backtesting.market import build_market
 from src.backtesting.validation import deflated_sharpe, probability_of_overfitting
 from src.data_collection.external_data import ExternalDataStore

@@ -39,7 +39,7 @@ from src.predictive_engine.structure import analyse as analyse_structure
 from src.backtesting.report import start_years, strategy_report, strategy_state, trade_markers_from_report
 from src.strategies.registry import ACTIVE_STRATEGY_ID, STRATEGIES, get_strategy
 from src.analysis.technical_indicators import indicator_table
-from src.analysis.primary_history import CHART_EXCHANGE, CHART_SYMBOL
+from src.analysis.primary_history import MAIN_SOURCE, PRICE_SOURCES
 from src.app.routine import daily_routine, load_history
 from src.data_collection.external_data import ExternalDataStore
 from src.data_collection.market_data_repository import MarketDataRepository
@@ -83,13 +83,16 @@ class AppState:
 
     def reload(self) -> None:
         """Rebuild everything shown in the app from the databases."""
-        # one BTC history for everything: Bybit (the owner's exchange) from its first
-        # candle, Kraken/Bitstamp before. Indicators per timeframe on first use.
+        # one BTC history for everything: Bitstamp, its missing hours filled from
+        # Kraken, Coinbase, Bybit (primary_history.get_trading_history).
+        # Indicators per timeframe on first use.
         history = load_history(self.repository)
         chart_history = history
-        bybit = [t for t in chart_history.candles if chart_history.sources[t.timestamp] == CHART_EXCHANGE][:1]
-        price_source = {"exchange": CHART_EXCHANGE if bybit else "primary", "symbol": CHART_SYMBOL if bybit else "BTC/USD",
-                        "from": int(bybit[0].timestamp.timestamp()) if bybit else None}
+        filled = len(history.substituted_hours())
+        main = next(iter(history.primary_by_hour.values()), MAIN_SOURCE)
+        price_source = {"exchange": main, "fallbacks": [e for e, _ in PRICE_SOURCES if e != main],
+                        "from": int(history.candles[0].timestamp.timestamp()) if history.candles else None,
+                        "filled_hours": filled, "hours": len(history.candles)}
         exchanges = exchange_status(self.repository, datetime.now(timezone.utc))
         external = self.external_store.load_all() if self.external_store else {}
         if self.other_markets_store is not None:

@@ -6,7 +6,7 @@ from io import BytesIO
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from src.backtesting.engine import BacktestResult, CostSettings
+from src.backtesting.engine import BacktestResult
 from src.backtesting.ledger import daily_sharpes, log_trials, read_trials, trial_count
 from src.backtesting.metrics import break_even_fee, daily_returns, sharpe, sortino, top_days_capture
 from src.backtesting.validation import (

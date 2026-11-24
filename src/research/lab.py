@@ -34,7 +34,7 @@ three ways of picking (single best, best family, average of the top 10).
 import math
 import os
 from concurrent.futures import ProcessPoolExecutor
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from itertools import product
 

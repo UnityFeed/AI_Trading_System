@@ -3,7 +3,9 @@ The learning engine's report card (predictive engine): it is replayed from
 the first day of data to today, one day at a time, seeing only what was known
 each day, and learning from every outcome as it arrives.
 
-Shows per horizon (7, 14, 30 days): its score against the plain base rate
+The DAILY chart only (one honest replay with the default settings; the
+training session `python -m scripts.train_engine` covers 1h/4h/1d with the
+10 setting versions). Shows per horizon (7, 14, 30 days): its score against the plain base rate
 (Brier skill), how often its most likely scenario was right, each expert's
 own score and the blend's current weights, and the learning curve per year.
 Plus the track record of every chart pattern type on the daily chart, and
@@ -23,7 +25,8 @@ from src.app.routine import load_history
 from src.backtesting.market import build_market
 from src.data_collection.external_data import ExternalDataStore
 from src.data_collection.market_data_repository import MarketDataRepository
-from src.predictive_engine import learner
+from src.data_collection.training_coins import DEFAULT_PATH as COINS_DB
+from src.predictive_engine import learner, training
 from src.predictive_engine.patterns import detect_patterns, track_record
 from src.predictive_engine.service import EngineService
 
@@ -33,6 +36,7 @@ def main() -> None:
     parser.add_argument("--from-year", type=int, default=2017, help="score forecasts from this year on")
     parser.add_argument("--db", type=Path, default=None, help=argparse.SUPPRESS)
     parser.add_argument("--external-db", type=Path, default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--coins-db", type=Path, default=None, help=argparse.SUPPRESS)
     args = parser.parse_args()
 
     started = time.time()
@@ -40,7 +44,8 @@ def main() -> None:
     external = (ExternalDataStore(args.external_db) if args.external_db else ExternalDataStore()).load_all()
     history = load_history(repository)
     market = build_market(history, "1d", external=external)
-    service = EngineService(market, history.candles)
+    coins = MarketDataRepository(args.coins_db or COINS_DB)  # the AI's training coins, as in the app
+    service = EngineService(market, history.candles, coin_loader=lambda: training.load_coin_markets(coins))
     candles = market.candles
 
     print("LEARNING ENGINE REPLAY: day by day from the first day of data, learning as outcomes arrive")
@@ -48,7 +53,7 @@ def main() -> None:
     print(f"{candles[0].timestamp:%Y-%m-%d} to {candles[-1].timestamp:%Y-%m-%d}; experts: {', '.join(learner.EXPERTS)}; "
           f"scored from {args.from_year}")
     for h in learner.HORIZONS:
-        r = service.replays[h]
+        r = service.replays["1d"][h]
         n = b = bb = hits = 0
         per_expert = {e: 0.0 for e in learner.EXPERTS}
         for i, (p, o) in enumerate(zip(r.forecasts, r.outcomes)):

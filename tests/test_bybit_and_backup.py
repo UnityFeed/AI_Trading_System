@@ -1,4 +1,4 @@
-"""Bybit candles (owner's exchange), the chart's Bybit-first price history, and automatic backups."""
+"""Bybit candles (owner's exchange, last price fallback), the one-source trading history, and automatic backups."""
 
 import json
 import sqlite3
@@ -9,7 +9,7 @@ from io import BytesIO
 from pathlib import Path
 from unittest.mock import patch
 
-from src.analysis.primary_history import get_continuous_history, with_preferred_exchange
+from src.analysis.primary_history import get_trading_history
 from src.data_collection.backup import backup_database
 from src.data_collection.bybit_provider import BybitProvider
 from src.data_collection.exchange_updater import update_all_exchanges
@@ -110,33 +110,40 @@ class TestUpdaterAndBackup(unittest.TestCase):
             self.assertEqual(names, ["x_2026-11-08.db", "x_2026-11-09.db", "x_2026-11-10.db"])
 
 
-class TestChartHistory(unittest.TestCase):
+class TestTradingHistory(unittest.TestCase):
+    """One price source (Bitstamp, the longest history); only its missing hours come from Kraken, Coinbase, Bybit."""
 
-    def test_bybit_replaces_the_price_from_its_first_candle_and_fills_its_gaps(self):
+    def test_bitstamp_everywhere_and_gaps_filled_in_size_order(self):
         start = datetime(2026, 11, 14, tzinfo=timezone.utc)
         with tempfile.TemporaryDirectory() as folder:
             repo = MarketDataRepository(Path(folder) / "m.db")
-            repo.save_candles(hourly_candles([100.0 + k for k in range(10)], start=start, exchange="kraken"), timeframe="1h")
-            bybit = [c for c in hourly_candles([200.0 + k for k in range(10)], start=start, exchange="bybit", symbol="BTC/USDT")]
-            repo.save_candles([c for k, c in enumerate(bybit) if k >= 4 and k != 7], timeframe="1h")
-            base = get_continuous_history(repo, start, start + 10 * H)
-            chart = with_preferred_exchange(base, repo)
-        closes = [c.close for c in chart.candles]
-        self.assertEqual(closes[:4], [100.0, 101.0, 102.0, 103.0])  # before Bybit: Kraken
-        self.assertEqual(closes[4:7], [204.0, 205.0, 206.0])  # Bybit
-        self.assertEqual(closes[7], 107.0)  # Bybit missing this hour: Kraken, shown as filled
-        self.assertTrue(chart.is_substituted(start + 7 * H))
-        self.assertFalse(chart.is_substituted(start + 5 * H))
-        self.assertFalse(chart.is_substituted(start + 1 * H))
-        self.assertEqual(base.candles[5].close, 105.0)  # the strategies' history is unchanged
+            closes = [100.0 + k for k in range(8)]
+            repo.save_candles([c for k, c in enumerate(hourly_candles(closes, start=start, exchange="bitstamp"))
+                               if k not in (2, 3, 5)], timeframe="1h")
+            repo.save_candles([c for k, c in enumerate(hourly_candles([200.0 + k for k in range(8)], start=start,
+                                                                      exchange="kraken")) if k != 3], timeframe="1h")
+            repo.save_candles(hourly_candles([300.0 + k for k in range(8)], start=start, exchange="coinbase"),
+                              timeframe="1h")
+            repo.save_candles(hourly_candles([400.0 + k for k in range(8)], start=start, exchange="bybit",
+                                             symbol="BTC/USDT"), timeframe="1h")
+            h = get_trading_history(repo, start, start + 8 * H)
+        self.assertEqual([c.close for c in h.candles], [100, 101, 202, 303, 104, 205, 106, 107])
+        self.assertEqual([h.sources[c.timestamp] for c in h.candles],
+                         ["bitstamp", "bitstamp", "kraken", "coinbase", "bitstamp", "kraken", "bitstamp", "bitstamp"])
+        self.assertEqual(len(h.substituted_hours()), 3)  # filled hours: never traded on
+        self.assertTrue(all(c.exchange == "primary" and c.symbol == "BTC/USD" for c in h.candles))
 
-    def test_without_bybit_the_history_is_returned_as_is(self):
+    def test_bybit_is_the_last_fallback(self):
         start = datetime(2026, 11, 14, tzinfo=timezone.utc)
         with tempfile.TemporaryDirectory() as folder:
             repo = MarketDataRepository(Path(folder) / "m.db")
-            repo.save_candles(hourly_candles([100.0, 101.0], start=start), timeframe="1h")
-            base = get_continuous_history(repo, start, start + 2 * H)
-            self.assertIs(with_preferred_exchange(base, repo), base)
+            repo.save_candles([c for k, c in enumerate(hourly_candles([100.0, 101.0, 102.0], start=start,
+                                                                      exchange="bitstamp")) if k != 1], timeframe="1h")
+            repo.save_candles(hourly_candles([400.0, 401.0, 402.0], start=start, exchange="bybit", symbol="BTC/USDT"),
+                              timeframe="1h")
+            h = get_trading_history(repo, start, start + 3 * H)
+        self.assertEqual([c.close for c in h.candles], [100.0, 401.0, 102.0])
+        self.assertEqual(h.sources[start + H], "bybit")
 
 
 if __name__ == "__main__":

@@ -28,7 +28,7 @@ HISTORY_START = datetime(2013, 1, 1, tzinfo=timezone.utc)
 
 def load_history(repository: MarketDataRepository) -> ContinuousHistory:
     end = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
-    return get_trading_history(repository=repository, start=HISTORY_START, end=end)  # Bybit first
+    return get_trading_history(repository=repository, start=HISTORY_START, end=end)  # Bitstamp, gaps filled
 
 
 def daily_routine(

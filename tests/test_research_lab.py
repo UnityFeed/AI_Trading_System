@@ -1,7 +1,7 @@
 import math
 import random
 import unittest
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 
 from src.analysis.technical_indicators import calculate_indicators
 from src.analysis.timeframes import aggregate_hourly_candles, period_start

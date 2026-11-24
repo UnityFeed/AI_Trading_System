@@ -10,7 +10,7 @@ from src.predictive_engine import learner
 from src.predictive_engine.levels import adx, fibonacci, support_resistance
 from src.predictive_engine.patterns import detect_patterns, status_at
 from src.predictive_engine.service import EngineService
-from src.predictive_engine.structure import Pivot, analyse
+from src.predictive_engine.structure import Pivot
 from src.predictive_engine.volume_profile import volume_profile
 from tests.helpers import hourly_candles
 

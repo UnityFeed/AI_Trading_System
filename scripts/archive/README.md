@@ -12,6 +12,8 @@ of the daily workflow. Do not rerun them without a clear reason.
 | `check_coinbase_source_candle.py` | Checked one suspicious Coinbase candle against the API (2017-04-15). |
 | `inspect_kraken_source_candle.py` | Checked suspicious Kraken candles against the original CSV. |
 | `inspect_return_extremes.py` | Looked at the largest hourly returns around known anomalies. |
+| `report_hourly_analysis.py` | Early hourly SMA + returns report on Kraken only (replaced by `report_indicators`). |
+| `report_hourly_returns.py` | Early hourly returns report on Kraken only (replaced by `report_indicators`). |
 
 Run one only if needed, from the project folder:
 `python -m scripts.archive.<name>`

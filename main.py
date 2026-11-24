@@ -34,7 +34,7 @@ def main() -> None:
             with read_only(market_db) as connection:
                 rows = connection.execute("""
                     SELECT exchange, COUNT(*), MAX(timestamp) FROM market_candles
-                    WHERE symbol = 'BTC/USD' AND timeframe = '1h'
+                    WHERE symbol IN ('BTC/USD', 'BTC/USDT') AND timeframe = '1h'
                     GROUP BY exchange ORDER BY exchange
                 """).fetchall()
         except sqlite3.Error as exc:

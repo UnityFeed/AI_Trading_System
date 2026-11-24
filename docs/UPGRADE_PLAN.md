@@ -52,8 +52,14 @@ they install with one `pip install` on the owner's PC.
    Forecasts stay BTC. Stocks/commodities: their own AI later (owner).
 2. [BUILT 24 Nov 2026] Bybit's own BTC/USDT prices (the owner's exchange) as a
    4th source (own provider on Bybit's documented v5 API, no extra library);
-   the MAIN BTC PRICE from July 2021 on for everything: chart, strategies,
-   backtests, paper trading, AI (owner: "switch to bybit").
+   briefly the main price from July 2021, then (same day, owner: "I don't
+   like that the BTC price is mixed") ONE source for everything: Bitstamp
+   (longest history), its few missing hours filled from Kraken, Coinbase,
+   Bybit. Bybit stays downloaded as a fill-in and validation source.
+7. [DONE 24 Nov 2026] Cleanup run: dead code removed (old SMA crossover,
+   old Kraken-only collector, unused AI helpers), early reports archived,
+   every script run against a test DB, CLAUDE.md rewritten (history moved
+   to docs/HISTORY.md), README updated.
 3. Derivatives context with free history: funding rates (Bybit/Binance from
    2019-2020), open interest, Deribit volatility index (DVOL, from 2021).
 4. [BUILT 24 Nov 2026] Other markets (owner): S&P 500, Nasdaq 100, Dow 30,

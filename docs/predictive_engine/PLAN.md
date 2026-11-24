@@ -40,6 +40,9 @@ cases, target zone and invalidation level, updated every day, and every
 forecast is stored and scored so the owner can see whether it works.
 
 ## Status
+- 24 Nov 2026 (latest): price source changed to Bitstamp for every hour
+  (owner); the AI results below were measured on the earlier mixed history
+  (test DB, where Bitstamp and Kraken differ by ~0.1-0.2%); retrain on the PC.
 - 24 Nov 2026 (latest): (1) Bybit is the main BTC price for everything
   (chart, strategies, paper trading, AI) from its first candle in July 2021;
   Kraken/Bitstamp before. (2) Training coins ETH, BNB, XRP, SOL, TRX (Binance

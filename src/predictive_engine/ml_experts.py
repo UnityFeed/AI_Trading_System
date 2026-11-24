@@ -29,12 +29,8 @@ NAMES = ("trees", "analog")
 
 
 def available() -> bool:
-    try:
-        import lightgbm  # noqa: F401
-        import sklearn  # noqa: F401
-    except ImportError:
-        return False
-    return True
+    from importlib.util import find_spec
+    return find_spec("lightgbm") is not None and find_spec("sklearn") is not None
 
 
 def _labels(outcome_list) -> np.ndarray:

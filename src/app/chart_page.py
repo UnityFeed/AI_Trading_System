@@ -446,10 +446,11 @@ CHART_SCRIPT = r"""
     wrap.textContent = 'Loading ' + tf + ' candles...';
     fetchChunk(null).then(function (d) {
       var ps = d.price_source, label = document.getElementById('price-source');
-      if (ps && label) label.textContent = ps.exchange === 'bybit'
-        ? 'Price: Bybit BTC/USDT from ' + new Date(ps.from * 1000).toISOString().slice(0, 10) +
-          ' (your exchange); before that Kraken (2017+) and Bitstamp. Strategies, paper trading and the AI use the same prices.'
-        : 'Price: Kraken BTC/USD (2017+) and Bitstamp before (Bybit not downloaded yet: press "Update data").';
+      var cap = function (x) { return x.charAt(0).toUpperCase() + x.slice(1); };
+      if (ps && label) label.textContent = 'Price: ' + cap(ps.exchange) +
+        ' BTC/USD for every hour since ' + new Date(ps.from * 1000).toISOString().slice(0, 10) + ' (one source); ' +
+        ps.filled_hours.toLocaleString() + ' of ' + ps.hours.toLocaleString() + ' hours it lacks are filled from ' +
+        ps.fallbacks.map(cap).join(', then ') + ' (grey). Strategies, paper trading and the AI use the same prices.';
       cache[tf] = {candles: d.candles, indicators: d.indicators, markers: d.markers, hasMore: d.has_more};
       build();
     });

@@ -649,8 +649,8 @@ def render(data: DashboardData, nav_html: str = "") -> str:
             f"<td class='num'>{ex.candles:,}</td><td>{ex.latest:%Y-%m-%d %H:%M}</td></tr>")
     add("</table></div>")
     h = data.history
-    add(f"<p class='muted small'>One continuous history: Bitstamp before 2017, Kraken from 2017, "
-        f"Bybit (BTC/USDT, your exchange) from its first candle in 2021. "
+    add(f"<p class='muted small'>One price source: Bitstamp BTC/USD for every hour it has "
+        f"(missing hours filled from Kraken, Coinbase, Bybit). "
         f"{len(h.candles):,} hourly candles; {len(h.substituted_hours())} hours filled from another exchange "
         f"(outages); {len(h.unfilled_hours)} hours no exchange has.</p></section>")
     add("<section class='panel'><div class='panel-head'><h2>Research so far</h2>"

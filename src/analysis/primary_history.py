@@ -305,75 +305,82 @@ def get_continuous_history(
 
 
 # ---------------------------------------------------------------------------
-# Trading history (owner, 24 Nov 2026: "switch to Bybit"): Bybit's BTC price
-# (the owner's exchange) wherever Bybit has it, and the continuous
-# Kraken/Bitstamp history before Bybit's first candle. Used by the chart,
-# strategies, backtests, paper trading and the AI (get_trading_history).
+# Trading history (owner, 24 Nov 2026: "I don't like that the BTC price is
+# mixed from different sources... from the biggest to smallest database
+# source so that the price is consistent", choice "longest history first").
+#
+# ONE price source for every hour it has: Bitstamp (complete since Oct 2013).
+# Only hours Bitstamp lacks (excluded or zero-volume candles, outages) are
+# filled from the next source by stored history size: Kraken, then Coinbase,
+# then Bybit. Filled hours count as substituted: never a fill there, shown
+# grey on the chart. Used by the app, chart, paper trader, AI, backtests and
+# research scripts (routine.load_history). get_continuous_history above
+# (Bitstamp < 2017, Kraken from 2017) stays for validation reports and the
+# Coinbase premium.
 
-CHART_EXCHANGE = "bybit"
-CHART_SYMBOL = "BTC/USDT"
-
-
-def with_preferred_exchange(
-    history: ContinuousHistory,
-    repository: MarketDataRepository,
-    exchange: str = CHART_EXCHANGE,
-    symbol: str = CHART_SYMBOL,
-    market: str = "crypto",
-    exclusions_file: str | Path = DEFAULT_EXCLUSIONS_FILE,
-) -> ContinuousHistory:
-    """
-    `history` with `exchange`'s clean hourly candles in place of the others,
-    from that exchange's first stored candle on. An hour it lacks after that
-    keeps the history's candle and counts as substituted (shown as filled).
-    Returns `history` itself when the exchange has no candles yet.
-    """
-    if not history.candles:
-        return history
-    preferred = get_clean_candles(
-        repository=repository, symbol=symbol, market=market, timeframe="1h",
-        start=history.candles[0].timestamp, end=history.candles[-1].timestamp + _HOUR,
-        exchange=exchange, exclusions_file=exclusions_file,
-    )
-    if not preferred:
-        return history
-    by_hour = {c.timestamp: c for c in preferred}
-    first = preferred[0].timestamp
-    candles, sources, primary_by_hour = [], {}, {}
-    for c in history.candles:
-        t = c.timestamp
-        own = by_hour.pop(t, None) if t >= first else None
-        if own is not None:
-            candles.append(replace(own, exchange=PRIMARY_LABEL, symbol=c.symbol))
-            sources[t] = exchange
-        else:
-            candles.append(c)
-            sources[t] = history.sources[t]
-        primary_by_hour[t] = exchange if t >= first else history.primary_by_hour[t]
-    # hours only the preferred exchange has (none of the others) are added too
-    if by_hour:
-        for t, own in by_hour.items():
-            candles.append(replace(own, exchange=PRIMARY_LABEL, symbol=history.candles[0].symbol))
-            sources[t] = primary_by_hour[t] = exchange
-        candles.sort(key=lambda c: c.timestamp)
-    changes = [
-        SourceChange(b.timestamp, sources[a.timestamp], sources[b.timestamp], a.close, b.open)
-        for a, b in zip(candles, candles[1:])
-        if sources[a.timestamp] != sources[b.timestamp] and b.timestamp - a.timestamp == _HOUR
-    ]
-    have = {c.timestamp for c in candles}
-    return ContinuousHistory(
-        candles=candles, sources=sources, primary_by_hour=primary_by_hour, source_changes=changes,
-        unfilled_hours=[t for t in history.unfilled_hours if t not in have],
-    )
+PRICE_SOURCES = (  # (exchange, symbol), longest stored history first
+    ("bitstamp", "BTC/USD"),
+    ("kraken", "BTC/USD"),
+    ("coinbase", "BTC/USD"),
+    ("bybit", "BTC/USDT"),
+)
+MAIN_SOURCE = PRICE_SOURCES[0][0]
 
 
 def get_trading_history(
     repository: MarketDataRepository,
     start: datetime,
     end: datetime,
+    market: str = "crypto",
     exclusions_file: str | Path = DEFAULT_EXCLUSIONS_FILE,
+    sources: tuple = PRICE_SOURCES,
 ) -> ContinuousHistory:
-    """The BTC history everything trades and learns on: Bybit first, Kraken/Bitstamp before (and in Bybit's gaps)."""
-    base = get_continuous_history(repository=repository, start=start, end=end, exclusions_file=exclusions_file)
-    return with_preferred_exchange(base, repository, exclusions_file=exclusions_file)
+    """The BTC history everything trades and learns on: the first source, its missing hours filled in order."""
+    main = []
+    while sources and not main:  # the first source with data is the main one (normally Bitstamp)
+        main_exchange, main_symbol = sources[0]
+        main = get_clean_candles(repository=repository, symbol=main_symbol, market=market, timeframe="1h",
+                                 start=start, end=end, exchange=main_exchange, exclusions_file=exclusions_file)
+        if not main:
+            sources = sources[1:]
+    if not main:
+        return ContinuousHistory([], {}, {}, [], [])
+    by_hour = {c.timestamp: c for c in main}
+    first = main[0].timestamp
+    last = end.astimezone(timezone.utc).replace(minute=0, second=0, microsecond=0) - _HOUR
+    fills: dict[str, dict] = {}
+    missing = _missing_ranges(by_hour, first, last)
+    for exchange, symbol in sources[1:]:
+        found = {}
+        for range_start, range_end in missing:
+            for candle in get_clean_candles(repository=repository, symbol=symbol, market=market, timeframe="1h",
+                                            start=range_start, end=range_end, exchange=exchange,
+                                            exclusions_file=exclusions_file):
+                found[candle.timestamp] = candle
+        fills[exchange] = found
+    candles, source_of, unfilled = [], {}, []
+    hour = first
+    while hour <= last:
+        candle, exchange = by_hour.get(hour), main_exchange
+        if candle is None:
+            for exchange, _ in sources[1:]:
+                candle = fills[exchange].get(hour)
+                if candle is not None:
+                    break
+        if candle is None:
+            unfilled.append(hour)
+        else:
+            candles.append(replace(candle, exchange=PRIMARY_LABEL, symbol=main_symbol))
+            source_of[hour] = exchange
+        hour += _HOUR
+    # trailing hours nobody has yet (the newest hour not downloaded) are not "missing"
+    while unfilled and candles and unfilled[-1] > candles[-1].timestamp:
+        unfilled.pop()
+    changes = [
+        SourceChange(b.timestamp, source_of[a.timestamp], source_of[b.timestamp], a.close, b.open)
+        for a, b in zip(candles, candles[1:])
+        if source_of[a.timestamp] != source_of[b.timestamp] and b.timestamp - a.timestamp == _HOUR
+    ]
+    return ContinuousHistory(candles=candles, sources=source_of,
+                             primary_by_hour={c.timestamp: main_exchange for c in candles},
+                             source_changes=changes, unfilled_hours=unfilled)

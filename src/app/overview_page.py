@@ -255,7 +255,7 @@ def overview_page(history, exchanges, account, kill_switch_on: bool, extras=()) 
             f"<td>{ex.latest:%Y-%m-%d %H:%M}</td></tr>")
     add("</table></div>"
         f"<p class='muted small'>{len(history.candles):,} hourly candles since {candles[0].timestamp:%Y} "
-        f"(Bitstamp before 2017, Kraken from 2017, Bybit from 2021; {len(history.substituted_hours())} outage hours filled from "
+        f"(all from Bitstamp; {len(history.substituted_hours())} hours it lacks filled from "
         "another exchange).</p></section>" if candles else "</table></div></section>")
     add("</div>")
 

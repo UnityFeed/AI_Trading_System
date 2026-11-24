@@ -21,7 +21,6 @@ Usage:
 
 import argparse
 import csv
-import math
 import os
 import time
 from functools import partial

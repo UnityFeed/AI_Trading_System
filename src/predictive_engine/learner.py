@@ -133,13 +133,6 @@ class Replay:
     state: dict = field(default_factory=dict)  # learned model at the end (for a memorised extra pass)
 
 
-def _softmax(z):
-    m = max(z)
-    e = [math.exp(v - m) for v in z]
-    s = sum(e)
-    return [v / s for v in e]
-
-
 def _log_loss(p: dict, kind: str) -> float:
     return -math.log(max(p[kind], 1e-6))
 
@@ -411,11 +404,6 @@ def chain(replays: dict[int, Replay], chosen: dict[int, int], market: Market) ->
         out.raw[i] = r.raw[i] if r.raw else None
     out.learning_curve = learning_curve(out, market)
     return out
-
-
-def nested_selection(replays: list[Replay], market: Market) -> tuple[Replay, list[dict]]:
-    chosen, table = choose_by_year([yearly_brier(r, market) for r in replays], [r.config.name for r in replays])
-    return chain(dict(enumerate(replays)), chosen, market), table
 
 
 def skill(r: Replay, market: Market, from_year: int = 0) -> dict:
