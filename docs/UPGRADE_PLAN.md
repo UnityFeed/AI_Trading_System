@@ -35,7 +35,7 @@ they install with one `pip install` on the owner's PC.
    gradient-boosted trees (learn combinations of conditions) and "similar
    past situations" (nearest neighbours), retrained every 30 days on outcomes
    known by then; the blend decides how much to trust them.
-3. Automatic tests on GitHub (GitHub Actions: `pytest` on every push), so a
+3. [BUILT 24 Nov 2026] Automatic tests on GitHub (GitHub Actions: `pytest` on every push), so a
    broken change shows a red cross before the owner pulls it.
 4. Pinned versions (a lock file via `uv` or `pip-tools`) so every install
    is identical; `uv` also installs ~10x faster than pip.
