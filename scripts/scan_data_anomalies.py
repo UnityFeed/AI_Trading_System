@@ -1,4 +1,5 @@
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 from statistics import median
 
@@ -16,7 +17,7 @@ def main():
     if not db_path.is_file():
         raise FileNotFoundError(f"Database not found: {db_path}")
 
-    with sqlite3.connect(db_path) as connection:
+    with closing(sqlite3.connect(db_path)) as connection:
         rows = connection.execute("""
             SELECT
                 exchange,

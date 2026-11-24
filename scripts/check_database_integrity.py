@@ -1,6 +1,7 @@
 
 import math
 import sqlite3
+from contextlib import closing
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -21,7 +22,7 @@ def main():
     print(f"Timeframe: {timeframe}")
     print()
 
-    with sqlite3.connect(db_path) as connection:
+    with closing(sqlite3.connect(db_path)) as connection:
 
         integrity = connection.execute(
             "PRAGMA integrity_check"

@@ -16,6 +16,7 @@ The database is opened read-only; nothing is changed.
 """
 
 import sqlite3
+from contextlib import closing
 import sys
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
@@ -153,7 +154,7 @@ def main(db_path: Path | None = None) -> None:
     # mode=ro opens the file read-only, so this script cannot change it.
     uri = f"{db_path.resolve().as_uri()}?mode=ro"
 
-    with sqlite3.connect(uri, uri=True) as connection:
+    with closing(sqlite3.connect(uri, uri=True)) as connection:
 
         exchanges = [
             row[0]

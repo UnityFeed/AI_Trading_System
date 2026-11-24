@@ -2,6 +2,7 @@
 
 import json
 import sqlite3
+from contextlib import closing
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -95,14 +96,15 @@ class TestUpdaterAndBackup(unittest.TestCase):
             backups = list((Path(folder) / "backups").glob("market_data_*.db"))
             self.assertEqual(len(backups), 1)
             # the backup was taken BEFORE the update: it has no Bybit rows
-            with sqlite3.connect(backups[0]) as c:
+            with closing(sqlite3.connect(backups[0])) as c:
                 self.assertEqual(c.execute("SELECT COUNT(*) FROM market_candles WHERE exchange='bybit'").fetchone()[0], 0)
 
     def test_backup_once_a_day_and_keep_the_newest(self):
         with tempfile.TemporaryDirectory() as folder:
             db = Path(folder) / "x.db"
-            with sqlite3.connect(db) as c:
+            with closing(sqlite3.connect(db)) as c:
                 c.execute("CREATE TABLE t (a)")
+                c.commit()
             for day in range(1, 11):
                 self.assertIsNotNone(backup_database(db, keep=3, today=datetime(2026, 11, day, tzinfo=timezone.utc)))
             self.assertIsNone(backup_database(db, keep=3, today=datetime(2026, 11, 10, 18, tzinfo=timezone.utc)))
