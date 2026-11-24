@@ -35,6 +35,7 @@ from bisect import bisect_left, insort
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 
+from src.research.other_market_features import other_market_features
 from src.analysis.technical_indicators import calculate_indicators
 from src.backtesting import features as price
 from src.backtesting.exposure import (
@@ -318,6 +319,9 @@ def build_frame(market: Market, premium: dict[date, float] | None = None) -> Fea
                 growth[days[k]] = (sum(last90[-30:]) / 30) / (sum(last90) / 90) - 1
         v["chain.hash_growth_30_90"] = _lookup(market, growth, HASH_RATE_LAG_DAYS)
         v["chain.hash_stress"] = _lookup(market, hash_stress_by_day(hr), HASH_RATE_LAG_DAYS)
+
+    # other markets (S&P 500, Nasdaq 100, Dow 30, gold, silver), when loaded into market.external
+    v.update(other_market_features(market))
 
     # exchange flow
     if premium:

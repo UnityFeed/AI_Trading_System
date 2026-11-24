@@ -52,7 +52,7 @@ def exchange_status(repository: MarketDataRepository, now: datetime) -> list[Exc
         rows = connection.execute("""
             SELECT exchange, COUNT(*), MIN(timestamp), MAX(timestamp)
             FROM market_candles
-            WHERE symbol = 'BTC/USD' AND market = 'crypto' AND timeframe = '1h'
+            WHERE symbol IN ('BTC/USD', 'BTC/USDT') AND market = 'crypto' AND timeframe = '1h'
             GROUP BY exchange ORDER BY exchange
         """).fetchall()
     result = []

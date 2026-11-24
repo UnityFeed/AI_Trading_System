@@ -8,6 +8,8 @@
 numpy>=2.3
 scikit-learn>=1.7
 lightgbm>=4.6
+# time zones of the other markets (Windows has no built-in time zone database)
+tzdata
 
 # Development / testing:
 pytest>=8.0

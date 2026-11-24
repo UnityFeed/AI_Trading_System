@@ -18,6 +18,7 @@ adx(candles)
   gives the regime: trending (ADX >= 25), ranging (ADX < 20), in between.
 """
 
+from bisect import bisect_left
 from dataclasses import dataclass
 
 from src.data_collection.market_data import MarketData
@@ -41,26 +42,65 @@ class Zone:
         return (self.low + self.high) / 2
 
 
-def support_resistance(pivots: list[Pivot], price: float, at_index: int, tolerance: float = 0.015,
-                       min_touches: int = 2, lookback: int | None = None) -> list[Zone]:
-    known = [p for p in pivots if p.confirmed_index <= at_index
-             and (lookback is None or p.index >= at_index - lookback)]
+def zone_clusters(known: list[Pivot], tolerance: float = 0.015, min_touches: int = 2) -> list[tuple]:
+    """Clusters of swing prices within `tolerance`: (low, high, touches, mid, last index), lowest first."""
     clusters: list[list[Pivot]] = []
+    sums: list[float] = []  # running sum per cluster (same result as summing again, much faster)
     for p in sorted(known, key=lambda q: q.price):
         if clusters and p.price <= clusters[-1][0].price * (1 + tolerance) and \
-                p.price <= _mean(clusters[-1]) * (1 + tolerance):
+                p.price <= sums[-1] / len(clusters[-1]) * (1 + tolerance):
             clusters[-1].append(p)
+            sums[-1] += p.price
         else:
             clusters.append([p])
-    zones = []
+            sums.append(0.0 + p.price)
+    out = []
     for c in clusters:
         if len(c) < min_touches:
             continue
         low, high = min(p.price for p in c), max(p.price for p in c)
-        mid = (low + high) / 2
-        zones.append(Zone(low, high, len(c), "support" if mid < price else "resistance",
-                          max(p.index for p in c)))
-    return zones
+        out.append((low, high, len(c), (low + high) / 2, max(p.index for p in c)))
+    return out
+
+
+def support_resistance(pivots: list[Pivot], price: float, at_index: int, tolerance: float = 0.015,
+                       min_touches: int = 2, lookback: int | None = None) -> list[Zone]:
+    known = [p for p in pivots if p.confirmed_index <= at_index
+             and (lookback is None or p.index >= at_index - lookback)]
+    return [Zone(low, high, touches, "support" if mid < price else "resistance", last)
+            for low, high, touches, mid, last in zone_clusters(known, tolerance, min_touches)]
+
+
+def nearest_levels_over_time(candles: list, timeframe: str, lookback: int | None, max_swings: int | None = None):
+    """
+    For every candle: (distance to the nearest support below, distance to the
+    nearest resistance above, position inside the last Fibonacci swing), from
+    the swings KNOWN at its close. Zones are rebuilt only when the known swings
+    in the window change. Same values as calling support_resistance/fibonacci
+    per candle.
+    """
+    from src.predictive_engine.patterns import swings_known_over_time
+
+    version = 0
+    cache_key, clusters = None, []
+    for i, known, changed in swings_known_over_time(candles, timeframe):
+        version += changed
+        recent = known if max_swings is None else known[-max_swings:]
+        start = 0
+        if lookback is not None:  # swings are in time order: skip those before the window
+            start = bisect_left([p.index for p in recent], i - lookback) if recent and recent[0].index < i - lookback else 0
+        key = (version, len(known), start)
+        if key != cache_key:
+            clusters = zone_clusters(recent[start:])
+            cache_key = key
+        price = candles[i].close
+        below = [high for low, high, _, mid, _ in clusters if mid < price]
+        above = [low for low, high, _, mid, _ in clusters if mid >= price]
+        support = price / max(below) - 1 if below else None
+        resistance = min(above) / price - 1 if above else None
+        fib = fibonacci(recent, i)
+        position = (price - fib.start) / (fib.end - fib.start) if fib and fib.end != fib.start else None
+        yield i, support, resistance, position
 
 
 def _mean(items: list[Pivot]) -> float:

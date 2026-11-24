@@ -7,5 +7,10 @@ if not exist ".venv\Scripts\python.exe" (
   pause
   exit /b 1
 )
+REM Install the libraries the first time (or after an update added one).
+".venv\Scripts\python.exe" -c "import numpy, sklearn, lightgbm, tzdata" 2>nul || (
+  echo Installing the required libraries once, see requirements.txt ...
+  ".venv\Scripts\python.exe" -m pip install -r requirements.txt
+)
 ".venv\Scripts\python.exe" -m scripts.run_app
 pause

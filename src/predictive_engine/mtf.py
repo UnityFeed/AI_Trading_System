@@ -26,10 +26,11 @@ from datetime import timedelta
 
 from src.analysis.timeframes import TIMEFRAME_HOURS
 from src.backtesting.market import Market
-from src.predictive_engine.levels import adx, fibonacci, support_resistance
+from src.predictive_engine.levels import adx, nearest_levels_over_time
 from src.predictive_engine.outcomes import candle_volatility
-from src.predictive_engine.patterns import detect_patterns, pattern_features, swings_known_over_time
+from src.predictive_engine.patterns import detect_patterns, pattern_features
 from src.predictive_engine.structure import analyse
+from src.research.other_market_features import other_market_features
 
 
 ORDER = ("1h", "4h", "1d", "1w")
@@ -48,17 +49,8 @@ def level_features(market: Market, structure=None, max_swings: int = 300) -> dic
     support: list = [None] * n
     resistance: list = [None] * n
     fib_position: list = [None] * n
-    for i, known, _ in swings_known_over_time(c, market.timeframe):
-        recent = known[-max_swings:]
-        price = c[i].close
-        zones = support_resistance(recent, price, i, lookback=lookback)
-        below = [z.high for z in zones if z.kind == "support"]
-        above = [z.low for z in zones if z.kind == "resistance"]
-        support[i] = price / max(below) - 1 if below else None
-        resistance[i] = min(above) / price - 1 if above else None
-        fib = fibonacci(recent, i)
-        if fib and fib.end != fib.start:
-            fib_position[i] = (price - fib.start) / (fib.end - fib.start)
+    for i, s, r, f in nearest_levels_over_time(c, market.timeframe, lookback, max_swings):
+        support[i], resistance[i], fib_position[i] = s, r, f
     return {"support": support, "resistance": resistance, "fib": fib_position}
 
 
@@ -145,6 +137,21 @@ def _higher_context(lower: Market, higher: Market) -> dict[str, list]:
     return out
 
 
+SCALES = {"ret1": 0.02, "ret5": 0.05, "ret20": 0.10, "trend200": 0.15}
+
+
+def _other_markets(market: Market, external: dict) -> dict[str, list]:
+    """S&P 500, Nasdaq 100, Dow 30, gold, silver: last completed trading day, squashed to about -1..1."""
+    out = {}
+    for name, values in other_market_features(market, external).items():
+        kind = name.rsplit(".", 1)[1]
+        if kind == "vol20":
+            out[name] = [0.0 if v is None else math.tanh((v - 0.2) / 0.2) for v in values]
+        else:
+            out[name] = [_squash(v, SCALES[kind]) for v in values]
+    return out
+
+
 def tf_inputs(markets: dict[str, Market], timeframe: str):
     """(names, rows, keys) for the learning engine on `timeframe`, with every higher timeframe's context."""
     market = markets[timeframe]
@@ -152,6 +159,8 @@ def tf_inputs(markets: dict[str, Market], timeframe: str):
     higher = [tf for tf in ORDER[ORDER.index(timeframe) + 1:] if tf in markets]
     for tf in higher:
         features.update(_higher_context(market, markets[tf]))
+    daily = markets.get("1d")
+    features.update(_other_markets(market, daily.external if daily is not None else {}))
     names = sorted(features)
     n = len(market.candles)
     rows = [[features[name][i] for name in names] for i in range(n)]

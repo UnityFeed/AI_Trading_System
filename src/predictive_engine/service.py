@@ -20,12 +20,13 @@ load, then served for "now" or for any past day AS IT WAS KNOWN THEN (replay).
 import bisect
 import math
 import threading
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
 from src.backtesting.market import Market
 from src.data_collection.market_data import MarketData
 from src.analysis.timeframes import TIMEFRAME_HOURS
 from src.predictive_engine import learner, training
+from src.research import other_market_features
 from src.predictive_engine.levels import adx, fibonacci, regime, support_resistance
 from src.predictive_engine.outcomes import candle_volatility, default_min_move, outcomes
 from src.predictive_engine.patterns import detect_patterns, status_at, swings_known_over_time, track_record
@@ -60,6 +61,8 @@ class EngineService:
         self.markets = dict(markets or {})
         self.markets["1d"] = daily
         self.cache = cache
+        if cache and cache.get("markets_mode") in other_market_features.MODES:
+            other_market_features.AI_MODE = cache["markets_mode"]  # same inputs as the training session
         self.patterns = patterns  # trees + analog experts (when the libraries are installed)
         self.replays: dict = {}  # timeframe -> {horizon: Replay}
         self.info: dict = {}  # timeframe -> {horizon: training-session details or None}

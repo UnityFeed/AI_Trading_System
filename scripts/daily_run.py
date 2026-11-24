@@ -23,6 +23,7 @@ from scripts.build_dashboard import build
 from src.app.routine import daily_routine
 from src.data_collection.external_data import ExternalDataStore
 from src.data_collection.market_data_repository import MarketDataRepository
+from src.data_collection.other_markets import OtherMarketsStore
 from src.paper_trading.accounts import open_extra_accounts
 from src.paper_trading.store import PaperTradingStore
 
@@ -41,7 +42,7 @@ def main() -> None:
     start = datetime.fromisoformat(args.start).replace(tzinfo=timezone.utc) if args.start else None
 
     history = daily_routine(repository, store, update=not args.skip_update, start=start,
-                            external_store=ExternalDataStore(),
+                            external_store=ExternalDataStore(), other_markets_store=OtherMarketsStore(),
                             extra_accounts=open_extra_accounts(args.paper_db.parent if args.paper_db else None))
 
     path = build(repository, store, history)

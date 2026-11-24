@@ -15,8 +15,8 @@ from src.reporting.dashboard import change_24h, esc, fmt_pct, fmt_price, page, s
 
 PAGE_CSS = """
 .head-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; }
-.head-controls label { display: inline-flex; align-items: center; gap: 8px; color: var(--text-secondary); font-size: 14px; max-width: 100%; }
-.head-controls select { max-width: 100%; min-width: 0; }
+.head-controls label { display: inline-flex; align-items: center; gap: 8px; color: var(--text-secondary); font-size: 14px; max-width: 100%; min-width: 0; flex-wrap: wrap; }
+.head-controls select { max-width: calc(100vw - 32px); min-width: 0; }
 select { font: inherit; padding: 5px 8px; border-radius: 8px; border: 1px solid var(--border);
   background: var(--card); color: var(--text-primary); }
 .trade-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 14px 20px; margin-top: 6px; }

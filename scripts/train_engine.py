@@ -30,7 +30,9 @@ from src.analysis.technical_indicators import indicator_tables
 from src.app.routine import load_history
 from src.data_collection.external_data import ExternalDataStore
 from src.data_collection.market_data_repository import MarketDataRepository
+from src.data_collection.other_markets import OtherMarketsStore
 from src.predictive_engine import learner, training
+from src.research import other_market_features
 from src.predictive_engine.service import EngineService, horizon_label
 
 
@@ -43,15 +45,21 @@ def main() -> None:
     parser.add_argument("--timeframes", nargs="+", default=list(training.TIMEFRAMES), choices=training.TIMEFRAMES)
     parser.add_argument("--workers", type=int, default=os.cpu_count() or 1)
     parser.add_argument("--memorised", type=int, default=2, help="extra passes over the full chart (reported only)")
+    parser.add_argument("--markets", choices=other_market_features.MODES, default=other_market_features.AI_MODE,
+                        help="use S&P 500 / Nasdaq / Dow / gold / silver as AI inputs (default off: they did not help)")
     parser.add_argument("--configs", type=int, default=len(learner.CONFIGS), help=argparse.SUPPRESS)
     parser.add_argument("--db", type=Path, default=None, help=argparse.SUPPRESS)
     parser.add_argument("--external-db", type=Path, default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--other-markets-db", type=Path, default=None, help=argparse.SUPPRESS)
     parser.add_argument("--out", type=Path, default=training.CACHE_FILE, help=argparse.SUPPRESS)
     args = parser.parse_args()
 
     started = time.time()
     repository = MarketDataRepository(args.db) if args.db else MarketDataRepository()
     external = (ExternalDataStore(args.external_db) if args.external_db else ExternalDataStore()).load_all()
+    # S&P 500, Nasdaq 100, Dow 30, gold, silver (python -m scripts.update_other_markets)
+    external.update((OtherMarketsStore(args.other_markets_db) if args.other_markets_db else OtherMarketsStore()).load_all())
+    other_market_features.AI_MODE = args.markets  # also used inside the worker processes (passed below)
     history = load_history(repository)
     tables = indicator_tables(history.candles, ("1h", "4h", "1d", "1w"))
     markets = training.load_markets(history, tables, external)
@@ -59,8 +67,10 @@ def main() -> None:
     print("TRAINING SESSION: the learning engine on every timeframe, 10 setting versions each")
     print("=" * 96)
     print(f"data {history.candles[0].timestamp:%Y-%m-%d} to {history.candles[-1].timestamp:%Y-%m-%d %H:%M} UTC; "
-          f"{args.workers} workers; versions: " + ", ".join(c.name for c in learner.CONFIGS[:args.configs]))
+          f"{args.workers} workers; other markets as AI inputs: {args.markets} "
+          f"(stored: {', '.join(k[4:] for k in external if k.startswith('mkt.')) or 'none, run update_other_markets'}); versions: " + ", ".join(c.name for c in learner.CONFIGS[:args.configs]))
     cache = training.new_cache()
+    cache["markets_mode"] = args.markets  # the app continues with the same inputs
     for tf in args.timeframes:
         t = time.time()
         print(f"\n{tf} chart ({len(markets[tf].candles):,} candles) ...", flush=True)

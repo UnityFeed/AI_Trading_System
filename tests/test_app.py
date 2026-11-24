@@ -211,8 +211,14 @@ class TestServer(unittest.TestCase):
 
     def test_scenarios_api(self):
 
-        # 40 days of test data are too few for the learning engine's first forecast
+        # the AI is prepared in the background: first "learning", then the answer
+        # (40 days of test data are too few for the learning engine's first forecast)
         data = json.loads(self.get("/api/scenarios?h=7")[1])
+        for _ in range(100):
+            if data.get("status") != "learning":
+                break
+            time.sleep(0.2)
+            data = json.loads(self.get("/api/scenarios?h=7")[1])
         self.assertIn("error", data)
         self.assertNotIn("track_record", data)  # no forecast log given in this test: nothing recorded
         tools = json.loads(self.get("/api/tools?tf=4h")[1])

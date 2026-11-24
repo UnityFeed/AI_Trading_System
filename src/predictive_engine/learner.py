@@ -32,13 +32,15 @@ and a learning curve: how its score developed over the years.
 
 import math
 import random
+
+import numpy as np
 from dataclasses import dataclass, field
 
 from src.analysis.timeframes import TIMEFRAME_HOURS
 from src.backtesting.market import Market
-from src.predictive_engine.levels import adx, fibonacci, support_resistance
+from src.predictive_engine.levels import adx, nearest_levels_over_time
 from src.predictive_engine.outcomes import outcomes
-from src.predictive_engine.patterns import detect_patterns, pattern_features, swings_known_over_time
+from src.predictive_engine.patterns import detect_patterns, pattern_features
 from src.predictive_engine.scenarios import weekly_trend_on_days
 from src.predictive_engine.structure import analyse
 from src.research.features import FeatureFrame, build_frame, expanding_rank, weekly_from_daily
@@ -54,6 +56,7 @@ FORGET = 0.999  # weight memory per learned outcome (old mistakes slowly forgive
 SHARE = 0.05  # every expert keeps at least this share of the blend ("fixed share")
 LEARNING_RATE = 0.01
 L2 = 1e-3
+RESTUDY_BATCH = 32  # outcomes per step when re-studying (summed gradient)
 
 # Horizons in candles per timeframe (about 1 day / 3 days / 1 week on 1h,
 # 1 day / 1 week / 2 weeks on 4h, 1 / 2 weeks and 1 month on 1d)
@@ -104,16 +107,8 @@ def chart_features(market: Market, structure=None, patterns=None) -> dict[str, l
     fib_position: list = [None] * n
     # the swing list exactly as it was known at each close (a swing can later be
     # replaced by a more extreme one; the final list would leak that)
-    for i, known, _ in swings_known_over_time(c, "1d"):
-        price = c[i].close
-        zones = support_resistance(known, price, i, lookback=365)
-        below = [z.high for z in zones if z.kind == "support"]
-        above = [z.low for z in zones if z.kind == "resistance"]
-        near_support[i] = price / max(below) - 1 if below else None
-        near_resistance[i] = min(above) / price - 1 if above else None
-        fib = fibonacci(known, i)
-        if fib and fib.end != fib.start:
-            fib_position[i] = (price - fib.start) / (fib.end - fib.start)
+    for i, s, r, f in nearest_levels_over_time(c, "1d", 365):
+        near_support[i], near_resistance[i], fib_position[i] = s, r, f
     out = {
         "chart.adx": a,
         "chart.dist_support": near_support,
@@ -244,7 +239,16 @@ def replay(market: Market, horizon: int, names, rows, keys, seed: int = 7, confi
             decided_on.setdefault(o.decided_index, []).append(i)
 
     d = len(names)
-    w = [list(row) for row in start_state["w"]] if start_state else [[0.0] * (d + 1) for _ in KINDS]
+    # learned model: one weight row per outcome, last column = bias (numpy: same maths, much faster)
+    X = np.asarray(rows, dtype=np.float64).reshape(n, d)
+    X1 = np.hstack([X, np.ones((n, 1))])
+    Y = np.zeros((n, 3))
+    for i, o in enumerate(out):
+        if o is not None:
+            Y[i, KINDS.index(o.kind)] = 1.0
+    W = np.array(start_state["w"], dtype=np.float64) if start_state else np.zeros((3, d + 1))
+    no_bias = np.ones(d + 1)
+    no_bias[d] = 0.0  # L2 shrinks the weights, not the bias
     earlier_seen = start_state["seen"] if start_state else 0
     counts_all = {k: 0 for k in KINDS}
     counts_by = {name: {} for name in keys}
@@ -258,21 +262,23 @@ def replay(market: Market, horizon: int, names, rows, keys, seed: int = 7, confi
     weights_out: list = [None] * n
     lr, l2 = config.learning_rate, config.l2
 
-    def learned_probs(x):
-        return dict(zip(KINDS, _softmax([wk[d] + sum(a * b for a, b in zip(wk, x)) for wk in w])))
+    def softmax_rows(Z):
+        Z = Z - Z.max(axis=-1, keepdims=True)
+        E = np.exp(Z)
+        return E / E.sum(axis=-1, keepdims=True)
+
+    def learned_probs(i):
+        return dict(zip(KINDS, softmax_rows(W @ X1[i]).tolist()))
 
     def sgd(i):
-        x, y = rows[i], out[i].kind
-        p = learned_probs(x)
-        for c_index, kind in enumerate(KINDS):
-            g = p[kind] - (kind == y)
-            wk = w[c_index]
-            for j in range(d):
-                wk[j] -= lr * (g * x[j] + l2 * wk[j])
-            wk[d] -= lr * g
+        nonlocal W
+        x = X1[i]
+        g = softmax_rows(W @ x) - Y[i]
+        W = W - lr * (np.outer(g, x) + l2 * W * no_bias)
 
     def restudy():
-        """Go over the known outcomes again: the most recent half and a random older half, several times."""
+        """Go over the known outcomes again (the most recent half and a random older half), in small batches."""
+        nonlocal W
         known = learned_examples
         half = config.max_study // 2
         study = known[-half:]
@@ -281,8 +287,10 @@ def replay(market: Market, horizon: int, names, rows, keys, seed: int = 7, confi
             study = study + rng.sample(older, min(len(older), config.max_study - len(study)))
         for _ in range(config.restudy_epochs):
             rng.shuffle(study)
-            for j in study:
-                sgd(j)
+            for k in range(0, len(study), RESTUDY_BATCH):
+                batch = study[k:k + RESTUDY_BATCH]
+                G = softmax_rows(X1[batch] @ W.T) - Y[batch]
+                W = W - lr * (G.T @ X1[batch] + len(batch) * l2 * W * no_bias)
 
     last_restudy = 0
     restudy_every = round(config.restudy_days * 24 / TIMEFRAME_HOURS[market.timeframe])
@@ -311,7 +319,7 @@ def replay(market: Market, horizon: int, names, rows, keys, seed: int = 7, confi
         base = _counts_rates(counts_all, None)
         structure = _counts_rates(counts_by["structure"].get(keys["structure"][i], {k: 0 for k in KINDS}), base)
         regime = _counts_rates(counts_by["regime"].get(keys["regime"][i], {k: 0 for k in KINDS}), structure)
-        learned = learned_probs(rows[i])
+        learned = learned_probs(i)
         # the learned model is pulled toward the base rate while it has seen few outcomes
         seen = len(learned_examples) + earlier_seen
         trust = seen / (seen + 500.0)
@@ -330,7 +338,7 @@ def replay(market: Market, horizon: int, names, rows, keys, seed: int = 7, confi
         experts_out[i], weights_out[i] = experts, weights
 
     result = Replay(horizon, forecasts, experts_out, weights_out, out, raw=raw_out, config=config,
-                    state={"w": w, "seen": len(learned_examples) + earlier_seen})
+                    state={"w": W.tolist(), "seen": len(learned_examples) + earlier_seen})
     result.learning_curve = learning_curve(result, market)
     return result
 

@@ -1,6 +1,6 @@
 # AI Trading System: project guide for Claude Code
 
-Last updated: 23 Nov 2026. Owner: UnityFeed (beginner in Python, learning while building).
+Last updated: 24 Nov 2026. Owner: UnityFeed (beginner in Python, learning while building).
 
 **Keep this file current.** Whenever a roadmap step, known issue or decision
 changes, update the relevant section here in the same commit.
@@ -29,9 +29,13 @@ validation consider automated execution.
 - SQLite database at `database\market_data.db` (gitignored; back it up separately)
 - Libraries allowed since 24 Nov 2026 (owner: the standard-library rule was
   for early development; upgrade plan `docs/UPGRADE_PLAN.md`).
-  `requirements.txt`: numpy, scikit-learn, LightGBM (+ pytest dev). Install:
-  `.venv\Scripts\python -m pip install -r requirements.txt`. The app and the
-  daily routine still run without them (AI pattern experts then off).
+  `requirements.txt`: numpy (REQUIRED: indicators and the AI use it),
+  scikit-learn, LightGBM, tzdata (+ pytest dev). Install:
+  `.venv\Scripts\python -m pip install -r requirements.txt`; `start_app.bat`
+  installs them automatically when one is missing.
+- Automatic backups: before each data update `database/market_data.db` is
+  copied once per UTC day to `database/backups/` (newest 7 kept;
+  `src/data_collection/backup.py`).
 - GitHub Actions (`.github/workflows/tests.yml`) runs pytest on Windows
   (Python 3.13 + 3.14) after every push.
 - Git via GitHub Desktop; never commit `.env`, API keys or the database
@@ -65,7 +69,12 @@ Run scripts as modules (`-m scripts.name`, no `.py`) because imports start with 
 - Dashboard only: `python -m scripts.build_dashboard --open` -> `reports/dashboard.html`
 - Stop new paper buys: `New-Item database\STOP_PAPER_TRADING` (delete it to resume)
 - Tests: `python -m pytest -q`
-- Fetch latest candles for all 3 exchanges: `python -m scripts.update_all_exchanges`
+- Other markets for the AI (S&P 500, Nasdaq 100, Dow 30, gold, silver; Yahoo
+  Finance daily, free): `python -m scripts.update_other_markets` (the daily
+  routine and the app button also do it) -> `database/other_markets.db`
+- Fetch latest candles for all exchanges (Kraken, Bitstamp, Coinbase, Bybit):
+  `python -m scripts.update_all_exchanges` (Bybit's first run downloads its
+  full BTC/USDT history from 2021, about a minute)
   (forward-only from each exchange's latest stored candle; Kraken's OHLC API only
   serves roughly the last 720 hourly candles, so gaps older than ~30 days need the
   Kraken trades recovery instead)
@@ -158,6 +167,12 @@ their own `database/predictions.db` (phase 4).
   the session are learned live) and `data/predictive/forecasts_<tf>_h<h>.csv`
   (every forecast as made, with outcome). Without a session the app learns
   1h/4h in the background the first time (about 1-2 minutes).
+- Other markets as AI inputs (24 Nov 2026): `research/other_market_features.py`
+  (per market ret1/ret5/ret20, trend vs 200-day average, 20-day volatility;
+  a trading day D is used from BTC's daily close of D on). Yahoo checked
+  against FRED: median difference 0.0000% (S&P 500, Nasdaq 100, Dow).
+  Test DB: they made the AI WORSE (both 25 separate and 6 compact inputs), so
+  `AI_MODE = "off"`; `train_engine --markets compact|full` compares again.
 - Pattern experts (24 Nov 2026, `ml_experts.py`, needs the libraries):
   LightGBM trees (combinations of conditions) and "analog" (200 most similar
   past situations), retrained every 30 days on outcomes known by then, added
@@ -292,6 +307,17 @@ open, high, low, close, volume. DB primary key:
 
 ## Decisions already made (do not reverse)
 - Kraken is primary; Bitstamp and Coinbase are independent validation sources.
+- Bybit (owner, 24 Nov 2026: "add Bybit BTC price and make this the main
+  price on the chart"): Bybit spot BTC/USDT hourly, exchange "bybit", symbol
+  "BTC/USDT" in the market DB (`bybit_provider.py`, api.bybit.eu then
+  api.bybit.com, docs read 24 Nov 2026). The CHART (candles, chart
+  indicators, structure, S/R/patterns, volume profile) shows Bybit from its
+  first candle (2021) and the continuous Kraken/Bitstamp history before
+  (`primary_history.with_preferred_exchange`); hours Bybit lacks show the
+  Kraken candle as "filled". Strategies, backtests, paper trading and the AI
+  stay on the Kraken history (switching those is a separate owner decision).
+  Bybit blocks the cloud sessions' country (HTTP 403): only the owner's PC can
+  download it.
 - Never merge or overwrite exchanges in the DATABASE: each exchange's rows stay
   its own. Always pass `exchange=` explicitly (repository defaults to "kraken"
   only for backward compatibility).

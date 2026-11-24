@@ -38,7 +38,8 @@ from src.predictive_engine.service import EngineService
 from src.predictive_engine.structure import analyse as analyse_structure
 from src.backtesting.report import start_years, strategy_report, strategy_state, trade_markers_from_report
 from src.strategies.registry import ACTIVE_STRATEGY_ID, STRATEGIES, get_strategy
-from src.analysis.technical_indicators import indicator_tables
+from src.analysis.technical_indicators import indicator_table
+from src.analysis.primary_history import CHART_EXCHANGE, CHART_SYMBOL, with_preferred_exchange
 from src.app.routine import daily_routine, load_history
 from src.data_collection.external_data import ExternalDataStore
 from src.data_collection.market_data_repository import MarketDataRepository
@@ -62,13 +63,14 @@ class AppState:
 
     def __init__(self, repository: MarketDataRepository, store: PaperTradingStore,
                  external_store: ExternalDataStore | None = None, extra_accounts=(),
-                 forecast_log: ForecastLog | None = None):
+                 forecast_log: ForecastLog | None = None, other_markets_store=None):
         self.repository = repository
         self.store = store
         self.extra_accounts = list(extra_accounts)  # (ExtraAccount, PaperTradingStore)
         self.forecast_log = forecast_log  # predictive engine: forecasts are recorded here (None = not recorded)
 
         self.external_store = external_store
+        self.other_markets_store = other_markets_store  # S&P 500, Nasdaq 100, Dow 30, gold, silver (AI inputs)
         self.job_lock = threading.Lock()
         self.data_lock = threading.Lock()
         self.busy = False
@@ -81,28 +83,58 @@ class AppState:
     def reload(self) -> None:
         """Rebuild everything shown in the app from the databases."""
         history = load_history(self.repository)
-        tables = indicator_tables(history.candles, TIMEFRAMES)
-        series = {tf: build_series(history, tf, tables[tf]) for tf in TIMEFRAMES}
+        # the chart shows Bybit's price (the owner's exchange) where Bybit has it;
+        # strategies, backtests, paper trading and the AI keep the Kraken history.
+        # Indicators per timeframe are computed on first use (faster start).
+        chart_history = with_preferred_exchange(history, self.repository)
+        bybit = [t for t in chart_history.candles if chart_history.sources[t.timestamp] == CHART_EXCHANGE][:1]
+        price_source = {"exchange": CHART_EXCHANGE if bybit else "primary", "symbol": CHART_SYMBOL if bybit else "BTC/USD",
+                        "from": int(bybit[0].timestamp.timestamp()) if bybit else None}
         exchanges = exchange_status(self.repository, datetime.now(timezone.utc))
         external = self.external_store.load_all() if self.external_store else {}
+        if self.other_markets_store is not None:
+            external.update(self.other_markets_store.load_all())  # "mkt.<name>" daily closes
         with self.data_lock:
             self.external = external
             self.history = history
-            self.series = series
+            self.chart_history = chart_history
+            self.tables = {}  # timeframe -> indicator table of the strategies' history
+            self.chart_tables = {}  # timeframe -> indicator table of the chart's history
+            self.series = {}  # timeframe -> chart series
+            self.price_source = price_source
             self.exchanges = exchanges
-            self.tables = tables
             self.markets = {}
             self.reports = {}
             self.states = {}
             self.structures = {}
             self.engine = None  # predictive engine (learning replay), built on first use
 
+    def _table(self, timeframe: str):
+        """Indicator table of the strategies' history (call with data_lock held)."""
+        if timeframe not in self.tables:
+            self.tables[timeframe] = indicator_table(self.history.candles, timeframe)
+        return self.tables[timeframe]
+
+    def _chart_table(self, timeframe: str):
+        """Indicator table of the chart's history (Bybit first; call with data_lock held)."""
+        if self.chart_history is self.history:
+            return self._table(timeframe)
+        if timeframe not in self.chart_tables:
+            self.chart_tables[timeframe] = indicator_table(self.chart_history.candles, timeframe)
+        return self.chart_tables[timeframe]
+
+    def _series(self, timeframe: str):
+        """Chart series of one timeframe (call with data_lock held)."""
+        if timeframe not in self.series:
+            self.series[timeframe] = build_series(self.chart_history, timeframe, self._chart_table(timeframe))
+        return self.series[timeframe]
+
     def _market(self, timeframe: str):
         """Backtest market for one timeframe (call with data_lock held)."""
         market = self.markets.get(timeframe)
         if market is None:
             market = self.markets[timeframe] = build_market(
-                self.history, timeframe, table=self.tables.get(timeframe), external=self.external
+                self.history, timeframe, table=self._table(timeframe), external=self.external
             )
         return market
 
@@ -118,7 +150,7 @@ class AppState:
         """Market structure of one timeframe (swings, events, trend now), cached until reload."""
         with self.data_lock:
             if timeframe not in self.structures:
-                candles = self.tables[timeframe][0]
+                candles = self._chart_table(timeframe)[0]
                 s = analyse_structure(candles, timeframe)
                 self.structures[timeframe] = {
                     "timeframe": timeframe,
@@ -142,7 +174,9 @@ class AppState:
         """The predictive engine for the current data (call with data_lock held)."""
         if self.engine is None:
             markets = {tf: self._market(tf) for tf in ("1h", "4h", "1d", "1w")}
-            self.engine = EngineService(markets["1d"], self.history.candles, markets=markets, cache=training.load())
+            # every timeframe is prepared in the background on first use (never inside this lock)
+            self.engine = EngineService(markets["1d"], self.chart_history.candles, markets=markets,
+                                        cache=training.load(), timeframes=())
         return self.engine
 
     def scenario_state(self, horizon: int = 30, day: datetime | None = None, timeframe: str = "1d") -> dict:
@@ -168,7 +202,7 @@ class AppState:
     def tools(self, timeframe: str, until: datetime | None = None) -> dict:
         with self.data_lock:
             engine = self._engine()
-            candles = self.tables[timeframe][0]
+            candles = self._chart_table(timeframe)[0]
             return engine.tools(timeframe, candles, until)
 
     def overview(self) -> str:
@@ -241,7 +275,8 @@ class AppState:
     def _run(self, update: bool) -> None:
         try:
             daily_routine(self.repository, self.store, update=update, log=self._write,
-                          external_store=self.external_store, extra_accounts=self.extra_accounts)
+                          external_store=self.external_store, extra_accounts=self.extra_accounts,
+                          other_markets_store=self.other_markets_store)
             self._write("Refreshing charts and overview...")
             self.reload()
             self._write("Done.")
@@ -376,7 +411,8 @@ def make_handler(state: AppState):
                 except ValueError:
                     return self._json({"error": "bad number"}, 400)
                 with state.data_lock:
-                    payload = chunk(state.series[timeframe], before, limit)
+                    payload = chunk(state._series(timeframe), before, limit)
+                    payload["price_source"] = state.price_source
                 source = query.get("trades", ["paper"])[0]
                 if source == "paper":
                     payload["markers"] = trade_markers(state.store.fills(), timeframe)

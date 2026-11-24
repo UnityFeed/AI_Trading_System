@@ -39,25 +39,42 @@ they install with one `pip install` on the owner's PC.
    broken change shows a red cross before the owner pulls it.
 4. Pinned versions (a lock file via `uv` or `pip-tools`) so every install
    is identical; `uv` also installs ~10x faster than pip.
-5. Automatic database backups (SQLite online backup, daily, keep 14 days)
-   and log files with rotation in `logs/`.
+5. [BUILT 24 Nov 2026] Automatic database backups before each data update
+   (SQLite online backup, once a day, newest 7 kept in `database/backups/`).
+   Still to do: log files with rotation in `logs/`.
+6. [BUILT 24 Nov 2026] `start_app.bat` installs the libraries when one is
+   missing (numpy is now required: indicators use it).
 
 ### B. More and better data
 1. More coins as extra TRAINING examples for the AI (ETH and 3-5 other large
    coins, free history from Kraken/Coinbase): setups that work across coins
    are more trustworthy than BTC-only ones. Forecasts stay BTC.
-2. Bybit's own BTC/USDT prices (the owner's exchange) as a 4th source, via
-   `ccxt` (one library for 100+ exchanges, free).
+2. [BUILT 24 Nov 2026] Bybit's own BTC/USDT prices (the owner's exchange) as a
+   4th source (own provider on Bybit's documented v5 API, no extra library);
+   the MAIN PRICE ON THE CHART from 2021 on. Strategies/AI stay on Kraken.
 3. Derivatives context with free history: funding rates (Bybit/Binance from
    2019-2020), open interest, Deribit volatility index (DVOL, from 2021).
-4. Macro (FRED, free): dollar index, US rates, liquidity; daily, lagged.
+4. [BUILT 24 Nov 2026] Other markets (owner): S&P 500, Nasdaq 100, Dow 30,
+   gold, silver, daily from Yahoo Finance (checked against FRED). AI inputs
+   in a compact form (see PLAN.md for the honest test). Trading them: later.
+   Still open: dollar index, US rates (FRED).
 5. Order flow: the recorder runs since 22 Nov 2026; use it once there are
    3+ months.
 
 ### C. Speed
-1. Indicators, features and outcomes with numpy/pandas (vectorised):
-   expected 10-50x faster; same results checked against the current code
-   (the current pure-Python versions become the test reference).
+[PART BUILT 24 Nov 2026] measured on the test DB:
+| step | before | after | how |
+|---|---|---|---|
+| app start (with Bybit chart price) | ~6 s | 1.4 s | indicators per timeframe on first use |
+| AI "re-study" versions, 4h | 69 s | 7 s | numpy + small batches |
+| 4h AI inputs | 4.9 s | 1.7 s | support/resistance zones cached (identical values) |
+| 1h support/resistance inputs | 13.4 s | 5.0 s | same (identical values) |
+| training session, 1d / 4h | 157 s / 215 s | ~55 s / ~115 s | all of the above |
+| Bollinger bands | 0.21 s | 0.07 s | numpy (differences < 1e-13) |
+The AI also prepares every timeframe in the background, so the app never
+waits for it.
+1. Next: indicators (EMA/RSI/MACD/ATR) with numpy, the remaining per-candle
+   loop of the AI, the 1h training (~8 min).
 2. DuckDB or Parquet files for research reads (SQLite stays the master
    store), if loading becomes the bottleneck.
 3. Training session: target under 3 minutes for all timeframes.

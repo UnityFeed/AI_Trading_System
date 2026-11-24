@@ -2,12 +2,14 @@
 The daily routine, shared by the terminal command (scripts/daily_run.py)
 and the app's button:
 
-1. update the hourly candles of Kraken, Bitstamp and Coinbase
-   (and run every extra paper account side by side, src/paper_trading/accounts.py)
+1. update the hourly candles of Kraken, Bitstamp, Coinbase and Bybit
+   (the market database is backed up once a day first)
 2. update the free external daily data (Coin Metrics: MVRV, market cap,
-   hash rate), when a store is given; a failure here is reported but does
-   not stop the routine
+   hash rate) and the other markets (S&P 500, Nasdaq 100, Dow 30, gold,
+   silver), when their stores are given; a failure here is reported but
+   does not stop the routine
 3. let the paper trader process every new completed candle
+   (and run every extra paper account side by side, src/paper_trading/accounts.py)
 """
 
 from datetime import datetime, timezone
@@ -16,6 +18,7 @@ from src.analysis.primary_history import ContinuousHistory, get_continuous_histo
 from src.data_collection.exchange_updater import update_all_exchanges
 from src.data_collection.external_data import ExternalDataStore, update_external_data
 from src.data_collection.market_data_repository import MarketDataRepository
+from src.data_collection.other_markets import OtherMarketsStore, update_other_markets
 from src.paper_trading.store import PaperTradingStore
 from src.paper_trading.trader import STARTING_CASH, PaperTrader
 
@@ -36,6 +39,7 @@ def daily_routine(
     log=print,
     external_store: ExternalDataStore | None = None,
     extra_accounts=(),
+    other_markets_store: OtherMarketsStore | None = None,
 ) -> ContinuousHistory:
     """`extra_accounts`: (ExtraAccount, PaperTradingStore) pairs run after the main account."""
     """Run the routine and return the refreshed history."""
@@ -54,6 +58,13 @@ def daily_routine(
             log(f"  WARNING: external data not updated: {error}")
     else:
         log("STEP 2/3  Skipped external data update")
+
+    if update and other_markets_store is not None:
+        log("          Updating other markets (S&P 500, Nasdaq 100, Dow 30, gold, silver; Yahoo Finance)")
+        try:
+            update_other_markets(other_markets_store, log=lambda *parts: log("  " + " ".join(map(str, parts))))
+        except Exception as error:  # needs internet; never blocks the paper trader
+            log(f"  WARNING: other markets not updated: {error}")
 
     log("STEP 3/3  Paper trading")
     history = load_history(repository)

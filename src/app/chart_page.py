@@ -215,7 +215,7 @@ CHART_SCRIPT = r"""
     b.addEventListener('click', function () {
       tf = name; save('chart-tf', tf);
       tfBox.querySelectorAll('button').forEach(function (x) { x.setAttribute('aria-pressed', x.textContent === tf ? 'true' : 'false'); });
-      fillHorizons(); scenarios = null; builtTf = null;
+      fillHorizons(); scenarios = null; builtTf = null; renderScenarios();
       show();
     });
     tfBox.appendChild(b);
@@ -445,6 +445,11 @@ CHART_SCRIPT = r"""
     if (cache[tf]) { build(); return; }
     wrap.textContent = 'Loading ' + tf + ' candles...';
     fetchChunk(null).then(function (d) {
+      var ps = d.price_source, label = document.getElementById('price-source');
+      if (ps && label) label.textContent = ps.exchange === 'bybit'
+        ? 'Price: Bybit BTC/USDT from ' + new Date(ps.from * 1000).toISOString().slice(0, 10) +
+          ' (your exchange); before that Kraken (2017+) and Bitstamp. Strategies, paper trading and the AI use the Kraken history.'
+        : 'Price: Kraken BTC/USD (2017+) and Bitstamp before (Bybit not downloaded yet: press "Update data").';
       cache[tf] = {candles: d.candles, indicators: d.indicators, markers: d.markers, hasMore: d.has_more};
       build();
     });
@@ -755,9 +760,9 @@ def chart_page() -> str:
         "<div class='state-strip' id='state'></div><div class='scenario-strip' id='scenarios'></div>"
         "<div class='scenario-strip' id='tools-strip'></div>"
         "<div id='chart-wrap'><div id='readout'></div><div id='chart'></div></div>"
-        "<div class='note'>Scroll or drag to move back in time (older candles load automatically), "
-        "pinch or mouse wheel to zoom. Grey candles contain hours filled in from another exchange "
-        "(Kraken outage). Times in UTC. Chart by TradingView Lightweight Charts.</div>",
+        "<div class='note'><span id='price-source'></span> Scroll or drag to move back in time (older candles load "
+        "automatically), pinch or mouse wheel to zoom. Grey candles contain hours filled in from another exchange "
+        "(outage or missing hour). Times in UTC. Chart by TradingView Lightweight Charts.</div>",
         head=f"<style>{NAV_CSS}{CHART_CSS}</style>",
         scripts=f"<script src='{CHART_LIBRARY}'></script><script>{NAV_SCRIPT}{SHARED_SELECTION_SCRIPT}{CHART_SCRIPT}</script>",
     )

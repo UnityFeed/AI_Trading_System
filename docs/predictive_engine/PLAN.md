@@ -40,6 +40,22 @@ cases, target zone and invalidation level, updated every day, and every
 forecast is stored and scored so the owner can see whether it works.
 
 ## Status
+- 24 Nov 2026 (later), other markets as AI inputs: S&P 500, Nasdaq 100,
+  Dow 30, gold, silver (Yahoo daily, checked against FRED), a trading day D
+  used from BTC's daily close of D on. Honest test, full training session
+  on the test DB (nested choice, all scored years), skill vs the base rate:
+  | chart, horizon | without | full (25 inputs) | compact (6 inputs) |
+  | 1d 7 / 14 / 30 days | +1.22 / +0.84 / +1.16% | +1.00 / +0.90 / +1.17% | +1.02 / +0.69 / +0.16% |
+  | 4h 1 / 7 / 14 days  | +1.99 / +3.05 / +3.20% | +1.72 / +2.19 / +1.74% | +1.84 / +2.49 / +2.70% |
+  | 1h 1 / 3 / 7 days   | +4.47 / +5.41 / +4.91% | +4.25 / +4.96 / +4.72% | (not finished) |
+  Both forms made the forecasts WORSE, so they are OFF as AI inputs by
+  default (`other_market_features.AI_MODE`); the data keeps being collected
+  and `python -m scripts.train_engine --markets compact|full` repeats the
+  comparison (e.g. on the real DB). Ideas: only from 2020 on (BTC and stocks
+  move together mostly since then), or only as a regime switch.
+  Speed (same results): support/resistance zones cached, learner in numpy,
+  re-study in batches of 32: training 1d 157 -> ~55 s, 4h 215 -> ~115 s;
+  the re-study versions 69 -> 7 s per 4h horizon.
 - 24 Nov 2026, pattern experts (owner allowed libraries; `ml_experts.py`):
   LightGBM trees and "analog" (nearest past situations), walk-forward
   (rebuilt every 30 days from outcomes known by then), added to the blend.

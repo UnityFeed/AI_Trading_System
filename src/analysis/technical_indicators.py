@@ -38,7 +38,9 @@ Definitions (the usual textbook ones):
 
 from dataclasses import dataclass
 from datetime import datetime
-from math import sqrt
+
+import numpy as np
+from numpy.lib.stride_tricks import sliding_window_view
 
 from src.analysis.timeframes import aggregate_hourly_candles, split_into_runs
 from src.data_collection.market_data import MarketData
@@ -189,16 +191,16 @@ def bollinger_series(
     lower: Series = [None] * len(closes)
     width: Series = [None] * len(closes)
 
-    for i, mean in enumerate(middle):
-        if mean is None:
-            continue
-
-        window = closes[i - period + 1:i + 1]
-        std = sqrt(sum((c - mean) ** 2 for c in window) / period)
-
-        upper[i] = mean + num_std * std
-        lower[i] = mean - num_std * std
-        width[i] = (upper[i] - lower[i]) / mean
+    ready = [i for i, mean in enumerate(middle) if mean is not None]
+    if ready:
+        # population standard deviation of each window, computed for all windows at once (numpy)
+        windows = sliding_window_view(np.asarray(closes, dtype=np.float64), period)[np.asarray(ready) - period + 1]
+        means = np.asarray([middle[i] for i in ready])
+        stds = np.sqrt(((windows - means[:, None]) ** 2).sum(axis=1) / period).tolist()
+        for i, mean, std in zip(ready, means.tolist(), stds):
+            upper[i] = mean + num_std * std
+            lower[i] = mean - num_std * std
+            width[i] = (upper[i] - lower[i]) / mean
 
     return middle, upper, lower, width
 

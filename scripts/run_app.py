@@ -16,6 +16,7 @@ from pathlib import Path
 
 from src.app.server import AppState, serve
 from src.data_collection.external_data import ExternalDataStore
+from src.data_collection.other_markets import OtherMarketsStore
 from src.data_collection.market_data_repository import MarketDataRepository
 from src.paper_trading.accounts import open_extra_accounts
 from src.predictive_engine.forecast_log import ForecastLog
@@ -34,6 +35,7 @@ def main() -> None:
     parser.add_argument("--db", type=Path, default=None, help=argparse.SUPPRESS)
     parser.add_argument("--paper-db", type=Path, default=None, help=argparse.SUPPRESS)
     parser.add_argument("--external-db", type=Path, default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--other-markets-db", type=Path, default=None, help=argparse.SUPPRESS)
     args = parser.parse_args()
 
     url = f"http://127.0.0.1:{args.port}/"
@@ -49,6 +51,7 @@ def main() -> None:
         ExternalDataStore(args.external_db) if args.external_db else ExternalDataStore(),
         open_extra_accounts(args.paper_db.parent if args.paper_db else None),
         ForecastLog(args.paper_db.parent / "predictions.db") if args.paper_db else ForecastLog(),
+        OtherMarketsStore(args.other_markets_db) if args.other_markets_db else OtherMarketsStore(),
     )
     server = serve(state, args.port)
     print(f"App running at {url}")

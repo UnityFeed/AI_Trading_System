@@ -302,3 +302,67 @@ def get_continuous_history(
         source_changes=changes,
         unfilled_hours=unfilled,
     )
+
+
+# ---------------------------------------------------------------------------
+# Chart history (owner, 24 Nov 2026): the CHART shows Bybit's BTC price (the
+# owner's exchange) wherever Bybit has it, and the continuous history before
+# Bybit's first candle. Strategies, backtests, paper trading and the AI keep
+# using the continuous Kraken/Bitstamp history above (unchanged decision).
+
+CHART_EXCHANGE = "bybit"
+CHART_SYMBOL = "BTC/USDT"
+
+
+def with_preferred_exchange(
+    history: ContinuousHistory,
+    repository: MarketDataRepository,
+    exchange: str = CHART_EXCHANGE,
+    symbol: str = CHART_SYMBOL,
+    market: str = "crypto",
+    exclusions_file: str | Path = DEFAULT_EXCLUSIONS_FILE,
+) -> ContinuousHistory:
+    """
+    `history` with `exchange`'s clean hourly candles in place of the others,
+    from that exchange's first stored candle on. An hour it lacks after that
+    keeps the history's candle and counts as substituted (shown as filled).
+    Returns `history` itself when the exchange has no candles yet.
+    """
+    if not history.candles:
+        return history
+    preferred = get_clean_candles(
+        repository=repository, symbol=symbol, market=market, timeframe="1h",
+        start=history.candles[0].timestamp, end=history.candles[-1].timestamp + _HOUR,
+        exchange=exchange, exclusions_file=exclusions_file,
+    )
+    if not preferred:
+        return history
+    by_hour = {c.timestamp: c for c in preferred}
+    first = preferred[0].timestamp
+    candles, sources, primary_by_hour = [], {}, {}
+    for c in history.candles:
+        t = c.timestamp
+        own = by_hour.pop(t, None) if t >= first else None
+        if own is not None:
+            candles.append(replace(own, exchange=PRIMARY_LABEL, symbol=c.symbol))
+            sources[t] = exchange
+        else:
+            candles.append(c)
+            sources[t] = history.sources[t]
+        primary_by_hour[t] = exchange if t >= first else history.primary_by_hour[t]
+    # hours only the preferred exchange has (none of the others) are added too
+    if by_hour:
+        for t, own in by_hour.items():
+            candles.append(replace(own, exchange=PRIMARY_LABEL, symbol=history.candles[0].symbol))
+            sources[t] = primary_by_hour[t] = exchange
+        candles.sort(key=lambda c: c.timestamp)
+    changes = [
+        SourceChange(b.timestamp, sources[a.timestamp], sources[b.timestamp], a.close, b.open)
+        for a, b in zip(candles, candles[1:])
+        if sources[a.timestamp] != sources[b.timestamp] and b.timestamp - a.timestamp == _HOUR
+    ]
+    have = {c.timestamp for c in candles}
+    return ContinuousHistory(
+        candles=candles, sources=sources, primary_by_hour=primary_by_hour, source_changes=changes,
+        unfilled_hours=[t for t in history.unfilled_hours if t not in have],
+    )

@@ -129,18 +129,22 @@ def aggregate_hourly_candles(
     hours_expected = TIMEFRAME_HOURS[timeframe]
     ordered = _validate_candles(candles)
 
-    # Group the hours by the period they belong to (in time order).
-    periods: dict[datetime, list[MarketData]] = {}
+    # Group the hours by the period they belong to (in time order). Periods are
+    # computed on whole seconds since 1970-01-01 00:00 UTC (a Thursday), which
+    # gives exactly period_start's UTC boundaries, much faster.
+    periods: dict[int, list[MarketData]] = {}
+    size = hours_expected * 3600
+    shift = 4 * 86400 if timeframe == "1w" else 0  # weeks start on Monday
 
     for candle in ordered:
-        periods.setdefault(
-            period_start(candle.timestamp, timeframe), []
-        ).append(candle)
+        seconds = int(candle.timestamp.timestamp())
+        periods.setdefault(seconds - (seconds - shift) % size, []).append(candle)
 
     derived = []
     incomplete = []
 
-    for start, hours in periods.items():
+    for key, hours in periods.items():
+        start = datetime.fromtimestamp(key, tz=timezone.utc)
 
         if len(hours) != hours_expected:
             incomplete.append(
