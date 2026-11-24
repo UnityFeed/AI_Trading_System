@@ -222,19 +222,20 @@ the clean test. Predictive engine: owner's blueprint and the gated plan in
 
 ## Status (summary; details and every number in `docs/HISTORY.md`)
 - Data verified 21 Nov 2026 (integrity, cross-exchange, daily candles equal the
-  exchanges' own). Price source switched to Bitstamp-first on 24 Nov 2026:
-  owner to rerun `daily_run` (downloads Bybit, paper accounts), then
-  `train_engine`, `run_strategy_research` on the PC.
-- Strategies (real DB, 22 Nov 2026, 0.25% fee, old price history): best
-  registered "Lab: weekly MACD + momentum, 50% core" x1.46 vs holding (drop
-  73%, ~1 trade/year, ahead from 10/13 start years); "50% core + Daily trend +
-  MACD" x1.29; "Daily trend + MACD" x0.81 with a much smaller drop. PBO across
-  registered strategies 0.93: no single proven winner; paper trading decides.
-  Hourly and 4h rule strategies do not survive fees.
-- AI (test DB, 24 Nov 2026, honest nested result, skill vs base rate): 1h
-  +4.5% / +5.6% / +4.7% (1/3/7 days), 4h +2.2% / +3.6% / +3.7% (1/7/14 days),
-  1d +1.6% / +1.3% / +1.0% (7/14/30 days). Real but small edges; treat the
-  chances as rough odds. Owner to train on the real DB.
+  exchanges' own). Bitstamp-first prices live on the owner's PC since
+  24 Nov 2026 (all four exchanges current, Bybit downloads fine there).
+- Strategies (REAL DB, 24 Nov 2026, Bitstamp prices, 0.25% fee): "Lab: weekly
+  MACD + momentum, 50% core" x1.44 vs holding (drop 73%, ~1 trade/year,
+  break-even fee 3.3%, ahead from 10/13 start years; x1.46 on the old
+  history: robust); "50% core + Daily trend + MACD" x1.10 (was x1.29);
+  "Daily trend + MACD" x0.56 (was x0.81). The price source alone moved the
+  daily crossover rules a lot: they are fragile; the slow weekly lab
+  strategy is the robust candidate. PBO 0.88: no single proven winner; paper
+  trading decides. Hourly and 4h rule strategies do not survive fees.
+- AI (REAL DB, 24 Nov 2026, honest nested result, skill vs base rate): 1h
+  +4.4% / +5.3% / +4.7% (1/3/7 days), 4h +2.1% / +3.8% / +3.8% (1/7/14 days),
+  1d +1.1% / +1.2% / +0.1% (7/14/30 days). Real but small edges; treat the
+  chances as rough odds. Training session ~25 min (first time, with coins).
 - Upgrades done 24 Nov 2026: libraries, pattern experts, GitHub Actions,
   backups, speed (app start ~1.4 s, training ~3x faster), cleanup run
   (dead code removed, every script run against a test DB).
@@ -251,8 +252,7 @@ Known issues:
 5. Yahoo Finance (other markets) is not an official API; it may change.
 
 ## Roadmap (next steps; full text in `docs/HISTORY.md`)
-1. Owner: run the daily routine, `train_engine` and `run_strategy_research` on
-   the real DB with the Bitstamp-first prices; paste the output.
+1. [DONE 24 Nov 2026] Real-DB runs on the Bitstamp-first prices (see Status).
 2. Live mode: stream the current price into the chart, live rule checklist,
    alerts before a rule triggers (decisions stay on completed candles).
 3. Upgrade plan (`docs/UPGRADE_PLAN.md`): logs with rotation, numpy indicators

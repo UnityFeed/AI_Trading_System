@@ -386,3 +386,36 @@ Known issues:
    Later (vision report): regime detection, volatility forecasting, prediction
    log with calibration, derivatives/on-chain layers if data allows.
 
+
+
+## 24 Nov 2026: owner's REAL DB on the one-source (Bitstamp-first) prices
+
+All 292 tests pass on the owner's PC (Python 3.15.2). `daily_run`: all four
+exchanges current to 2026-11-24 13:00 UTC (Bybit downloads fine from the
+owner's PC); paper accounts: main WAIT, lab HOLD 50%, core50 HOLD 50%.
+
+AI training session (`train_engine`, 1,485 s incl. the first download of the
+five training coins, 364k hourly candles), honest nested result, skill vs the
+base rate (top scenario right):
+| chart | short | middle | long |
+| 1d (7/14/30 days) | +1.06% (60.3%) | +1.19% (54.4%) | +0.10% (46.0%) |
+| 4h (1/7/14 days)  | +2.08% (63.5%) | +3.83% (49.6%) | +3.75% (45.0%) |
+| 1h (1/3/7 days)   | +4.36% (55.8%) | +5.25% (49.9%) | +4.67% (45.5%) |
+Memorised passes: 1d +3.0/+3.6% (7d), +3.8/+4.6% (14d), +2.6/+2.9% (30d):
+large inflation on the daily chart; 4h/1h barely (+0.1 to +1.0 pt). Versions
+used now: 1d slow learner/slow blend, 4h restudy/slow learner/slow blend, 1h
+calibrated/slow blend. Same picture as the test DB: short horizons on 1h/4h
+carry the edge; the daily 30-day forecast is level with the base rate.
+Today's forecasts (24 Nov): range most likely everywhere (44-72%).
+
+`run_strategy_research` (0.25% fee; buy and hold +50,080%, drop 85%; PBO
+0.88; Deflated Sharpe "beats holding" 0.00 for all), compared with the same
+run on the OLD mixed history (22 Nov):
+| strategy | old history | Bitstamp prices | 2022-now | BE fee | starts |
+| Lab: weekly MACD + momentum, 50% core | x1.46 | x1.44 | x1.42 | 3.34% | 10/13 |
+| 50% core + Daily trend + MACD | x1.29 | x1.10 | x1.22 | 0.61% | 10/13 |
+| Daily trend + MACD | x0.81 | x0.56 | x1.75 | never | 11/13 |
+Robustness lesson: the price source alone (Bitstamp vs Kraken, ~0.1-0.2%
+apart) moved the crossover strategies a lot (daily MACD/EMA crosses fire on
+other days), while the slow weekly lab strategy barely changed. The lab
+strategy is the most robust candidate; the daily crossover rules are fragile.
