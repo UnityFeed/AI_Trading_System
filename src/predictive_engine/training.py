@@ -26,7 +26,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from src.backtesting.market import Market, build_market
-from src.predictive_engine import learner, mtf
+from src.predictive_engine import learner, ml_experts, mtf
 from src.predictive_engine.outcomes import outcomes
 
 
@@ -91,11 +91,12 @@ class Column:
 
 def pack(r: learner.Replay) -> learner.Replay:
     """The same replay with its per-candle dicts stored compactly (outcomes are dropped: recomputed on load)."""
+    experts = tuple(next((e for e in r.experts if e is not None), {e: None for e in learner.EXPERTS}))
     return learner.Replay(
         r.horizon,
         Column.pack(r.forecasts, learner.KINDS),
-        Column.pack(r.experts, learner.KINDS, learner.EXPERTS),
-        Column.pack(r.weights, learner.EXPERTS),
+        Column.pack(r.experts, learner.KINDS, experts),
+        Column.pack(r.weights, experts),
         None,
         r.learning_curve,
         Column.pack(r.raw, learner.KINDS) if r.raw else [],
@@ -109,12 +110,20 @@ def pack(r: learner.Replay) -> learner.Replay:
 _WORKER: dict = {}
 
 
-def _init_worker(markets, timeframe):
+def _init_worker(markets, timeframe, inputs, extras):
     _WORKER.clear()
     _WORKER["markets"] = markets
-    _WORKER["inputs"] = inputs_for(markets, timeframe)
+    _WORKER["inputs"] = inputs
+    _WORKER["extras"] = extras
     _WORKER["timeframe"] = timeframe
     _WORKER["outcomes"] = {}
+
+
+def pattern_experts(rows, outcome_list, timeframe: str) -> dict:
+    """The walk-forward trees + analog experts, or nothing if the libraries are not installed."""
+    if not ml_experts.available():
+        return {}
+    return ml_experts.walk_forward_experts(rows, outcome_list, timeframe)
 
 
 def _outcomes(horizon):
@@ -125,37 +134,47 @@ def _outcomes(horizon):
 
 
 def _task(job):
-    """One job inside a worker: ("score", h, k) or ("full", h, k) or ("memorised", h, k, count)."""
+    """One job inside a worker: ("extras", h, 0), ("score", h, k), ("full", h, k) or ("memorised", h, k, count)."""
     kind, horizon, k = job[:3]
     market = _WORKER["markets"][_WORKER["timeframe"]]
     names, rows, keys = _WORKER["inputs"]
-    config = learner.CONFIGS[k]
     out = _outcomes(horizon)
+    if kind == "extras":
+        return job, pattern_experts(rows, out, _WORKER["timeframe"])
+    config = learner.CONFIGS[k]
+    extra = (_WORKER["extras"] or {}).get(horizon)
     if kind == "memorised":
-        result = learner.passes(market, horizon, names, rows, keys, config=config, count=job[3], outcome_list=out)
+        result = learner.passes(market, horizon, names, rows, keys, config=config, count=job[3], outcome_list=out,
+                                extra_experts=extra)
         return job, [learner.skill(r, market) for r in result]
-    r = learner.replay(market, horizon, names, rows, keys, config=config, outcome_list=out)
+    r = learner.replay(market, horizon, names, rows, keys, config=config, outcome_list=out, extra_experts=extra)
     if kind == "score":
         return job, (learner.yearly_brier(r, market), learner.skill(r, market))
     return job, pack(r)
 
 
-def _run(jobs, markets, timeframe, workers):
+def _run(jobs, markets, timeframe, workers, inputs, extras=None):
     if workers <= 1:
-        _init_worker(markets, timeframe)
+        _init_worker(markets, timeframe, inputs, extras)
         return dict(_task(j) for j in jobs)
-    with ProcessPoolExecutor(max_workers=workers, initializer=_init_worker, initargs=(markets, timeframe)) as pool:
+    with ProcessPoolExecutor(max_workers=min(workers, len(jobs)), initializer=_init_worker,
+                             initargs=(markets, timeframe, inputs, extras)) as pool:
         return dict(pool.map(_task, jobs))
 
 
 def train_timeframe(markets: dict[str, Market], timeframe: str, horizons=None, configs: int | None = None,
-                    memorised: int = 2, workers: int = 1, log=print) -> dict:
+                    memorised: int = 2, workers: int = 1, log=print, patterns: bool = True) -> dict:
     """Everything for one timeframe: per-version scores, nested choice, chained replay, memorised passes."""
     market = markets[timeframe]
     horizons = horizons or learner.TF_HORIZONS[timeframe]
     count = configs or len(learner.CONFIGS)
     names = [c.name for c in learner.CONFIGS[:count]]
-    scored = _run([("score", h, k) for h in horizons for k in range(count)], markets, timeframe, workers)
+    inputs = inputs_for(markets, timeframe)
+    extras = None
+    if patterns and ml_experts.available():  # trees + analog, walk-forward, once per horizon
+        done = _run([("extras", h, 0) for h in horizons], markets, timeframe, workers, inputs)
+        extras = {h: done[("extras", h, 0)] for h in horizons}
+    scored = _run([("score", h, k) for h in horizons for k in range(count)], markets, timeframe, workers, inputs, extras)
     result = {"end": market.candles[-1].timestamp.isoformat(), "n": len(market.candles),
               "first": market.candles[0].timestamp.isoformat(), "horizons": {}}
     plans = {}
@@ -167,7 +186,7 @@ def train_timeframe(markets: dict[str, Market], timeframe: str, horizons=None, c
     full_jobs = sorted({("full", h, k) for h, (chosen, _, current) in plans.items() for k in set(chosen.values()) | {current}})
     # honest pass + `memorised` extra passes over the same chart
     mem_jobs = [("memorised", h, plans[h][2], memorised + 1) for h in horizons] if memorised > 0 else []
-    done = _run(full_jobs + mem_jobs, markets, timeframe, workers)
+    done = _run(full_jobs + mem_jobs, markets, timeframe, workers, inputs, extras)
     for h in horizons:
         chosen, table, current = plans[h]
         replays = {k: done[("full", h, k)] for (kind, hh, k) in full_jobs if hh == h}
@@ -182,6 +201,7 @@ def train_timeframe(markets: dict[str, Market], timeframe: str, horizons=None, c
             "configs": [{"name": names[k], **scored[("score", h, k)][1]} for k in range(count)],
             "nested": learner.skill(chained, market),
             "memorised": done[("memorised", h, current, memorised + 1)][1:] if mem_jobs else [],
+            "experts": list(extras[h]) if extras else [],
         }
         log(f"  {timeframe} h={h}: honest (nested) {result['horizons'][h]['nested'].get('brier_skill', 0):+.2%}")
     return result

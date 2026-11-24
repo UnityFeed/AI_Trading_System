@@ -81,6 +81,8 @@ def main() -> None:
                 print(f"    memorised pass {k} (has seen these outcomes before, NOT a real result): "
                       f"skill {pct(m.get('brier_skill'))}, top scenario right {m.get('top_hit_rate', 0):.1%}")
             print(f"    version used now: {r['current_config']}")
+            print("    pattern experts: " + (", ".join(r.get("experts") or []) or
+                                           "off (pip install -r requirements.txt to add trees + analog)"))
             path = training.write_forecast_csv(markets[tf], tf, h, _with_outcomes(markets[tf], r["replay"], h),
                                                args.out.parent)
             print(f"    every forecast: {path}")

@@ -40,6 +40,33 @@ cases, target zone and invalidation level, updated every day, and every
 forecast is stored and scored so the owner can see whether it works.
 
 ## Status
+- 24 Nov 2026, pattern experts (owner allowed libraries; `ml_experts.py`):
+  LightGBM trees and "analog" (nearest past situations), walk-forward
+  (rebuilt every 30 days from outcomes known by then), added to the blend.
+  Test DB, "slow learner", 2017-now, skill vs the base rate:
+  | chart, horizon | without | with trees + analog | trees alone |
+  | 1d 7 days      | +1.23%  | +1.58%              | +1.43%      |
+  | 1d 14 days     | +0.99%  | +1.01%              | +1.00%      |
+  | 1d 30 days     | +1.60%  | +1.64%              | +1.66%      |
+  | 4h 1 day       | +0.87%  | +1.57%              | +1.85%      |
+  | 4h 7 days      | +0.71%  | +2.97%              | +3.90%      |
+  | 4h 14 days     | +0.19%  | +2.97%              | +4.72%      |
+  Settings changed ONCE after a first run (15 leaves / 50 neighbours were
+  overconfident: trees alone -6% to -14% on 1d): now 4 leaves, 300 cases per
+  leaf, 80 trees, 200 neighbours. Same one-time-change caveat as learner v2.
+  The analog expert alone stays near the base rate; the trees carry the gain,
+  most clearly on 4h (more examples than 1d).
+  Full training session with trees + analog (test DB, 14.5 min on 4 cores,
+  honest nested choice, all scored years; before -> after):
+  | chart | short | middle | long |
+  | 1d (7/14/30 days) | +0.55% -> +1.22% | +0.92% -> +0.84% | +0.69% -> +1.22% |
+  | 4h (1/7/14 days)  | +0.85% -> +1.99% | +0.79% -> +3.06% | +0.12% -> +3.20% |
+  | 1h (1/3/7 days)   | +1.37% -> +4.47% | +0.69% -> +5.41% | +0.09% -> +4.91% |
+  The 1h results were NOT looked at when the tree settings were changed
+  (only 1d/4h were), so 1h is the cleanest check of that change. Memorised
+  passes are now almost equal to the honest result (the trees do not
+  memorise). More candles = more to learn from: 1h gains most. Top
+  scenario right on 1h 3 days: 46.6% -> 49.9%.
 - 23 Nov 2026 (latest), learning engine v3 BUILT (owner: "let it run once or
   twice over the full chart... train on all the time frames... use data from a
   higher timeframe"):

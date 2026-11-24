@@ -132,7 +132,7 @@ class TestLearner(unittest.TestCase):
         past = svc.scenarios(7, c[600].timestamp)
         self.assertEqual(past["candle_time"], c[600].timestamp.isoformat())
         self.assertIsNotNone(past["outcome"])
-        self.assertEqual(sorted(now["weights"]), sorted(learner.EXPERTS))
+        self.assertTrue(set(learner.EXPERTS) <= set(now["weights"]))
         tools = svc.tools("1d", c, c[600].timestamp)
         self.assertEqual(tools["time"], int(c[600].timestamp.timestamp()))
         self.assertTrue(all(p["status"] for p in tools["patterns"]))

@@ -51,7 +51,7 @@ def _t(dt: datetime) -> int:
 class EngineService:
 
     def __init__(self, daily: Market, hourly: list[MarketData], markets: dict | None = None,
-                 cache: dict | None = None, timeframes=("1d",)):
+                 cache: dict | None = None, timeframes=("1d",), patterns: bool = True):
         """`markets`: 1h/4h/1d/1w markets (only needed for 1h/4h forecasts); `cache`: a saved training session."""
         self.market = daily
         self.hourly = hourly
@@ -60,6 +60,7 @@ class EngineService:
         self.markets = dict(markets or {})
         self.markets["1d"] = daily
         self.cache = cache
+        self.patterns = patterns  # trees + analog experts (when the libraries are installed)
         self.replays: dict = {}  # timeframe -> {horizon: Replay}
         self.info: dict = {}  # timeframe -> {horizon: training-session details or None}
         self.vols: dict = {}
@@ -104,7 +105,9 @@ class EngineService:
                 inputs = inputs or training.inputs_for(self.markets, timeframe)
                 config = next((c for c in learner.CONFIGS if saved_h and c.name == saved_h["current_config"]),
                               learner.Config())
-                live = training.pack(learner.replay(market, h, *inputs, config=config, outcome_list=out))
+                extra = training.pattern_experts(inputs[1], out, timeframe) if self.patterns else None
+                live = training.pack(learner.replay(market, h, *inputs, config=config, outcome_list=out,
+                                                    extra_experts=extra))
                 r = live if s is None else _Stitched(s["replay"], live, usable)
             r.outcomes = out
             replays[h] = r

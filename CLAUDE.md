@@ -27,8 +27,13 @@ validation consider automated execution.
 ## Environment
 - Windows, PowerShell, project at `C:\Users\PC\AI_Trading_System`, venv `.venv`
 - SQLite database at `database\market_data.db` (gitignored; back it up separately)
-- Application code uses only the Python standard library; `requirements.txt`
-  lists only `pytest` (dev). Install: `.venv\Scripts\python -m pip install -r requirements.txt`
+- Libraries allowed since 24 Nov 2026 (owner: the standard-library rule was
+  for early development; upgrade plan `docs/UPGRADE_PLAN.md`).
+  `requirements.txt`: numpy, scikit-learn, LightGBM (+ pytest dev). Install:
+  `.venv\Scripts\python -m pip install -r requirements.txt`. The app and the
+  daily routine still run without them (AI pattern experts then off).
+- GitHub Actions (`.github/workflows/tests.yml`) runs pytest on Windows
+  (Python 3.13 + 3.14) after every push.
 - Git via GitHub Desktop; never commit `.env`, API keys or the database
 - Claude Code cloud sessions do NOT have the database. Anything that needs real
   data must be run by the owner on the PC and the output pasted back.
@@ -153,6 +158,10 @@ their own `database/predictions.db` (phase 4).
   the session are learned live) and `data/predictive/forecasts_<tf>_h<h>.csv`
   (every forecast as made, with outcome). Without a session the app learns
   1h/4h in the background the first time (about 1-2 minutes).
+- Pattern experts (24 Nov 2026, `ml_experts.py`, needs the libraries):
+  LightGBM trees (combinations of conditions) and "analog" (200 most similar
+  past situations), retrained every 30 days on outcomes known by then, added
+  to the blend next to base/structure/regime/learned.
 
 ## Architecture (keep it; do not redesign without a clear reason)
 - `src/data_collection/`: `MarketData` dataclass, `data_validator`, `MarketDataProvider`
@@ -344,8 +353,8 @@ open, high, low, close, volume. DB primary key:
   lists them. Compare after >= 3 months before choosing one.
 - The app is local only: binds 127.0.0.1, never 0.0.0.0. It only reads the
   market DB except through the daily routine (forward candle update). The chart
-  library is the one external web dependency (pinned version, needs internet);
-  Python code stays standard-library only.
+  library is the one external web dependency (pinned version, needs internet).
+  Python libraries are allowed since 24 Nov 2026 (see Environment).
 - EVERY strategy we find or build goes into `src/strategies/registry.py`
   (owner requirement, 21 Nov 2026). That gives it the standard test
   automatically: full-history backtest in the Strategy tester (vs buy-and-hold,

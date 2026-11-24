@@ -184,3 +184,43 @@ class TestTrainingSession(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipUnless(__import__("src.predictive_engine.ml_experts", fromlist=["available"]).available(),
+                     "numpy / scikit-learn / LightGBM not installed")
+class TestPatternExperts(unittest.TestCase):
+
+    def test_trees_and_analog_never_see_the_future(self):
+        from src.predictive_engine import ml_experts
+        from src.predictive_engine.outcomes import outcomes
+        c = walk(1200)
+        cut = 1000
+        full, part = daily_market(c), daily_market(c[:cut])
+        rows_full, rows_part = learner.build_inputs(full)[1], learner.build_inputs(part)[1]
+        a = ml_experts.walk_forward_experts(rows_full, outcomes(full, 7), "1d", min_examples=200)
+        b = ml_experts.walk_forward_experts(rows_part, outcomes(part, 7), "1d", min_examples=200)
+        checked = 0
+        for name in ml_experts.NAMES:
+            for i in range(cut):
+                self.assertEqual(a[name][i] is None, b[name][i] is None)
+                if a[name][i] is not None:
+                    checked += 1
+                    self.assertAlmostEqual(sum(a[name][i].values()), 1.0, places=9)
+                    for k in learner.KINDS:
+                        self.assertAlmostEqual(a[name][i][k], b[name][i][k], places=9)
+        self.assertGreater(checked, 500)
+
+    def test_blend_uses_them_as_experts(self):
+        from src.predictive_engine import ml_experts
+        from src.predictive_engine.outcomes import outcomes
+        c = walk(900)
+        m = daily_market(c)
+        inputs = learner.build_inputs(m)
+        out = outcomes(m, 7)
+        extra = ml_experts.walk_forward_experts(inputs[1], out, "1d", min_examples=200)
+        r = learner.replay(m, 7, *inputs, outcome_list=out, extra_experts=extra)
+        last = r.weights[-1]
+        self.assertEqual(set(last), set(learner.EXPERTS) | {"trees", "analog"})
+        self.assertAlmostEqual(sum(last.values()), 1.0, places=9)
+        packed = training.pack(r)
+        self.assertEqual(set(packed.experts[-1]), set(last))

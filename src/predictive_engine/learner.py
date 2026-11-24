@@ -220,14 +220,21 @@ class Calibrator:
 
 
 def replay(market: Market, horizon: int, names, rows, keys, seed: int = 7, config: Config | None = None,
-           outcome_list: list | None = None, start_state: dict | None = None) -> Replay:
+           outcome_list: list | None = None, start_state: dict | None = None,
+           extra_experts: dict | None = None) -> Replay:
     """
     Walk forward candle by candle: learn from what became known, then predict.
 
     `start_state` (a previous replay's `state`) starts the learned model with
     everything it learned on an earlier pass over the SAME chart: that pass's
     scores are memorised, not honest (see `passes`).
+
+    `extra_experts` {name: per-candle probabilities or None} adds experts
+    computed outside, walk-forward (`ml_experts`: trees, analog). Before an
+    extra expert has its first model it says the same as the base rate.
     """
+    extra_experts = extra_experts or {}
+    all_experts = EXPERTS + tuple(extra_experts)
     config = config or Config()
     n = len(market.candles)
     out = outcome_list if outcome_list is not None else outcomes(market, horizon, k=1.0)
@@ -241,7 +248,7 @@ def replay(market: Market, horizon: int, names, rows, keys, seed: int = 7, confi
     earlier_seen = start_state["seen"] if start_state else 0
     counts_all = {k: 0 for k in KINDS}
     counts_by = {name: {} for name in keys}
-    loss = {e: 0.0 for e in EXPERTS}
+    loss = {e: 0.0 for e in all_experts}
     learned_examples: list[int] = []
     rng = random.Random(seed)
     calibrator = Calibrator(config.cal_bins, config.cal_prior) if config.calibrate else None
@@ -284,7 +291,7 @@ def replay(market: Market, horizon: int, names, rows, keys, seed: int = 7, confi
         for j in decided_on.get(i, []):
             o = out[j]
             if experts_out[j] is not None:  # score the experts on what they said back then
-                for e in EXPERTS:
+                for e in all_experts:
                     loss[e] = loss[e] * config.forget + _log_loss(experts_out[j][e], o.kind)
             if calibrator is not None and raw_out[j] is not None:
                 calibrator.learn(raw_out[j], o.kind)
@@ -310,11 +317,14 @@ def replay(market: Market, horizon: int, names, rows, keys, seed: int = 7, confi
         trust = seen / (seen + 500.0)
         learned = {k: trust * learned[k] + (1 - trust) * base[k] for k in KINDS}
         experts = {"base": base, "structure": structure, "regime": regime, "learned": learned}
+        for name, values in extra_experts.items():
+            v = values[i]
+            experts[name] = base if v is None else {k: trust * v[k] + (1 - trust) * base[k] for k in KINDS}
         low = min(loss.values())
-        raw = {e: math.exp(-config.eta * (loss[e] - low)) for e in EXPERTS}
+        raw = {e: math.exp(-config.eta * (loss[e] - low)) for e in all_experts}
         total = sum(raw.values())
-        weights = {e: config.share / len(EXPERTS) + (1 - config.share) * raw[e] / total for e in EXPERTS}
-        blend = {k: sum(weights[e] * experts[e][k] for e in EXPERTS) for k in KINDS}
+        weights = {e: config.share / len(all_experts) + (1 - config.share) * raw[e] / total for e in all_experts}
+        blend = {k: sum(weights[e] * experts[e][k] for e in all_experts) for k in KINDS}
         raw_out[i] = blend
         forecasts[i] = calibrator.apply(blend) if calibrator is not None else blend
         experts_out[i], weights_out[i] = experts, weights
@@ -326,7 +336,7 @@ def replay(market: Market, horizon: int, names, rows, keys, seed: int = 7, confi
 
 
 def passes(market: Market, horizon: int, names, rows, keys, config: Config | None = None,
-           count: int = 2, outcome_list: list | None = None) -> list[Replay]:
+           count: int = 2, outcome_list: list | None = None, extra_experts: dict | None = None) -> list[Replay]:
     """
     The honest pass plus `count - 1` MEMORISED passes over the same chart:
     each extra pass starts with the model the previous pass ended with, so it
@@ -334,10 +344,10 @@ def passes(market: Market, horizon: int, names, rows, keys, config: Config | Non
     much memory inflates the result; it is never used for the chart or the log.
     """
     out = outcome_list if outcome_list is not None else outcomes(market, horizon, k=1.0)
-    result = [replay(market, horizon, names, rows, keys, config=config, outcome_list=out)]
+    result = [replay(market, horizon, names, rows, keys, config=config, outcome_list=out, extra_experts=extra_experts)]
     for _ in range(count - 1):
         result.append(replay(market, horizon, names, rows, keys, config=config, outcome_list=out,
-                             start_state=result[-1].state))
+                             start_state=result[-1].state, extra_experts=extra_experts))
     return result
 
 

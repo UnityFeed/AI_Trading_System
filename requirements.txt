@@ -1,6 +1,13 @@
-# The application code uses only the Python standard library
-# (sqlite3, urllib, json, csv, datetime, ...). No third-party
-# packages are needed to run it.
+# Libraries (owner decision 24 Nov 2026: the standard-library-only rule was
+# for early development). Install into the venv with:
+#   .venv\Scripts\python -m pip install -r requirements.txt
 #
+# The app and daily routine still run without them; the AI's pattern experts
+# (decision trees + similar past situations) need numpy, scikit-learn and
+# LightGBM.
+numpy>=2.3
+scikit-learn>=1.7
+lightgbm>=4.6
+
 # Development / testing:
 pytest>=8.0
